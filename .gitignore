@@ -1,0 +1,26 @@
+# Build output
+build/
+.gradle/
+.kotlin/
+*.apk
+*.aab
+captures/
+.cxx/
+.externalNativeBuild/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Machine-specific and secrets
+local.properties
+keystore.properties
+*.jks
+*.keystore
+
+# Fetched automatically on the first build (see app/build.gradle.kts)
+app/libs/*.aar
+
+# Local working notes
+session.md
