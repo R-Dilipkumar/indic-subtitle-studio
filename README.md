@@ -39,8 +39,9 @@
 
 Get the APK from the [latest release](https://github.com/R-Dilipkumar/indic-subtitle-studio/releases/latest):
 
-- `app-arm64-v8a-release.apk` — almost every phone from the last 6+ years (about 31 MB)
-- `app-universal-release.apk` — if you are not sure (about 76 MB)
+- `SubtitleStudio-v0.1.0-arm64-v8a.apk` — almost every phone from the last 6+ years (about 31 MB)
+- `SubtitleStudio-v0.1.0-universal.apk` — if you are not sure (about 76 MB)
+- `SubtitleStudio-v0.1.0-armeabi-v7a.apk` — older 32-bit phones
 
 Open the file on your phone and allow "install unknown apps" when asked.
 
