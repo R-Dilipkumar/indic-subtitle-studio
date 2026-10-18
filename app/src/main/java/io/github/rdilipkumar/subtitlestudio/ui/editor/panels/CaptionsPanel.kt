@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.FindReplace
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -44,11 +45,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.rdilipkumar.subtitlestudio.core.model.TranslationState
 import io.github.rdilipkumar.subtitlestudio.ui.common.Badge
+import io.github.rdilipkumar.subtitlestudio.ui.common.SubtitleModeSwitch
 import io.github.rdilipkumar.subtitlestudio.ui.common.formatTime
 import io.github.rdilipkumar.subtitlestudio.ui.editor.EditorUi
 import io.github.rdilipkumar.subtitlestudio.ui.editor.EditorViewModel
 import io.github.rdilipkumar.subtitlestudio.ui.editor.Tool
 import io.github.rdilipkumar.subtitlestudio.ui.editor.cueMarkColor
+import io.github.rdilipkumar.subtitlestudio.ui.editor.rememberEditedFilePicker
 import io.github.rdilipkumar.subtitlestudio.ui.theme.Studio
 
 /** Every caption as a list (like a script). The one playing now is highlighted. */
@@ -60,15 +63,28 @@ fun CaptionsPanel(ui: EditorUi, vm: EditorViewModel, positionMs: Long, onSeek: (
   var adding by remember { mutableStateOf(false) }
   var replacing by remember { mutableStateOf(false) }
   var confirmRedo by remember { mutableStateOf(false) }
+  val loadEdited = rememberEditedFilePicker(vm)
   LaunchedEffect(playingIndex) {
     if (playingIndex >= 0 && listState.layoutInfo.visibleItemsInfo.none { it.index == playingIndex + 1 }) listState.animateScrollToItem(playingIndex)
   }
 
   LazyColumn(state = listState, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    if (ui.language.isIndic) {
+      item {
+        SubtitleModeSwitch(
+          ui.doc.tracks.mode,
+          vm::setSubtitleMode,
+          Modifier.padding(bottom = 6.dp),
+          soundsExample = cues.firstOrNull { it.phonetic.isNotBlank() }?.phonetic ?: "vanakkam nanbargale",
+          meaningExample = cues.firstOrNull { it.translation.isNotBlank() }?.translation ?: "Hello friends",
+        )
+      }
+    }
     item {
       Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         SmallAction("Add here", Icons.Rounded.Add) { adding = true }
         SmallAction("Find & replace", Icons.Rounded.FindReplace) { replacing = true }
+        if (cues.isNotEmpty()) SmallAction("Load edited file", Icons.Rounded.UploadFile, loadEdited)
         SmallAction(if (cues.isEmpty()) "Auto subtitles" else "Redo with AI", Icons.Rounded.AutoAwesome) {
           if (cues.isEmpty()) onRedo() else confirmRedo = true
         }

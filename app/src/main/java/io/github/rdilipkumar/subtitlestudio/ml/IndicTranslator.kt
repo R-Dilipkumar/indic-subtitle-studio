@@ -45,6 +45,7 @@ class IndicTranslator(dir: File, threads: Int = 4) : AutoCloseable {
     for ((i, p) in pieces.withIndex()) ids[i] = (srcVocab[p] ?: UNK).toLong()
     ids[pieces.size] = EOS.toLong()
     val n = ids.size.coerceAtMost(MAX_SOURCE)
+    ids[n - 1] = EOS.toLong() // a cut-off sentence must still end with EOS
     val inputIds = OnnxTensor.createTensor(env, LongBuffer.wrap(ids, 0, n), longArrayOf(1, n.toLong()))
     val mask = OnnxTensor.createTensor(env, LongBuffer.wrap(LongArray(n) { 1L }), longArrayOf(1, n.toLong()))
     val out = ArrayList<Int>()

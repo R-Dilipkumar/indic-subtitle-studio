@@ -23,17 +23,19 @@ object WordCheck {
     val type = Character.getType(first)
     if (type == Character.NON_SPACING_MARK.toInt() || type == Character.COMBINING_SPACING_MARK.toInt()) return true
     if (script == Script.TAMIL && first in TAMIL_NEVER_FIRST) return true
-    // A vowel sign and a virama on the same letter is not a real spelling.
+    // A vowel sign and a virama on the same letter is not a real spelling, except Malayalam's
+    // old way of writing the short "u" (u-sign + virama: അതു്).
     var prevOff = -1
     var i = 0
     while (i < w.length) {
       val cp = w.codePointAt(i)
       val off = cp - block
-      val isSign = off in 0x3E..0x4C && off != 0x4D
+      val isSign = off in 0x3E..0x4C
       val isVirama = off == 0x4D
       if (prevOff >= 0) {
-        val prevSign = prevOff in 0x3E..0x4C && prevOff != 0x4D
-        if ((prevSign && isVirama) || (prevOff == 0x4D && isSign)) return true
+        val prevSign = prevOff in 0x3E..0x4C
+        val halfU = script == Script.MALAYALAM && prevOff == 0x41 && isVirama
+        if ((prevSign && isVirama && !halfU) || (prevOff == 0x4D && isSign)) return true
       }
       prevOff = if (cp - block in 0..0x7F) off else -1
       i += Character.charCount(cp)

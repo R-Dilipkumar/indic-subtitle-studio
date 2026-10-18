@@ -4,6 +4,12 @@
   <!-- Only used to download language packs once. All speech, phonetics, translation and
        video work runs on the phone. -->
   <uses-permission android:name="android.permission.INTERNET" />
+  <!-- Keeps long jobs (subtitles, export, pack downloads) running when the user switches apps,
+       with a "working" notification. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
   <application
     android:name=".App"
@@ -31,6 +37,11 @@
         <data android:mimeType="video/*" />
       </intent-filter>
     </activity>
+
+    <service
+      android:name=".work.WorkService"
+      android:exported="false"
+      android:foregroundServiceType="dataSync|mediaProcessing" />
 
     <provider
       android:name="androidx.core.content.FileProvider"

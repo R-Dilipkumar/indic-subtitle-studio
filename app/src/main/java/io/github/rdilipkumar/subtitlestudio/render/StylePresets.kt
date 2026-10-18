@@ -35,6 +35,14 @@ object StylePresets {
       CaptionStyle(presetId = "reveal", fontId = "baloo", textSize = 0.054f, reveal = RevealMode.WORD_BY_WORD, highlight = HighlightMode.COLOR, highlightColor = 0xFF7DD3FC.toInt(), entrance = Anim.NONE),
     ),
     Preset(
+      "wordpop", "Word pop",
+      CaptionStyle(presetId = "wordpop", fontId = "luckiest", textSize = 0.056f, reveal = RevealMode.WORD_BY_WORD, wordAnim = Anim.POP, highlight = HighlightMode.COLOR, highlightColor = 0xFFFFE600.toInt(), uppercaseLatin = true, strokeWidth = 0.18f, entrance = Anim.NONE, exit = Anim.FADE),
+    ),
+    Preset(
+      "typing", "Typewriter",
+      CaptionStyle(presetId = "typing", fontId = "montserrat", textSize = 0.046f, reveal = RevealMode.LETTER_BY_LETTER, highlight = HighlightMode.NONE, box = BoxStyle.LINES, boxColor = 0xCC111111.toInt(), strokeWidth = 0f, shadow = false, entrance = Anim.NONE, exit = Anim.WIPE, exitMs = 260),
+    ),
+    Preset(
       "highlight", "Highlight box",
       CaptionStyle(presetId = "highlight", fontId = "montserrat", textSize = 0.048f, highlight = HighlightMode.BOX, highlightColor = 0xFF7C3AED.toInt(), strokeWidth = 0.08f, entrance = Anim.POP),
     ),

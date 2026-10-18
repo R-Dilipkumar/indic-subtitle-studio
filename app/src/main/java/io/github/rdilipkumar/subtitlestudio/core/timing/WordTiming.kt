@@ -96,9 +96,13 @@ object WordTiming {
       i = j
     }
     if (words.isEmpty()) return null
-    return words.mapIndexed { idx, (w, s, _) ->
-      val e = if (idx < words.lastIndex) words[idx + 1].second else endMs
-      Triple(w, s, max(s + 40, e))
+    // Two words can start in the same token; push later ones along so words never overlap.
+    var prevEnd = Long.MIN_VALUE
+    return words.mapIndexed { idx, (w, s0, _) ->
+      val s = max(s0, prevEnd)
+      val e = max(s + 40, if (idx < words.lastIndex) words[idx + 1].second else endMs)
+      prevEnd = e
+      Triple(w, s, e)
     }
   }
 }

@@ -40,6 +40,11 @@ class EditHistory(initial: SubtitleDoc, private val limit: Int = 300) {
     }
   }
 
+  /** Ends a run of folded edits: the next edit gets its own entry even with the same key. */
+  fun seal() {
+    entries[index] = entries[index].copy(key = null)
+  }
+
   fun undo(): SubtitleDoc? = if (canUndo) entries[--index].doc else null
   fun redo(): SubtitleDoc? = if (canRedo) entries[++index].doc else null
 

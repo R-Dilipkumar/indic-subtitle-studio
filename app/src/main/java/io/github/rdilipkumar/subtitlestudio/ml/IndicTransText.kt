@@ -19,8 +19,9 @@ object IndicTransText {
   /** Prepares a sentence for the translator: "<src> <tgt> tokens…". */
   fun prepare(text: String, from: Lang, to: Lang): String {
     var s = normalizePunct(Normalizer.normalize(text, Normalizer.Form.NFC))
+    if (from == Lang.MALAYALAM) s = atomicChillus(s)
     s = s.replace("​", "").replace("‌", "").replace("‍", "")
-    s = if (from == Lang.ENGLISH) tokenizeEnglish(s) else toDevanagari(splitPunct(expandChillus(s)), from.script)
+    s = if (from == Lang.ENGLISH) tokenizeEnglish(s) else toDevanagari(splitPunct(s), from.script)
     return "${from.floresCode} ${to.floresCode} ${s.trim()}"
   }
 
@@ -41,10 +42,14 @@ object IndicTransText {
   private fun splitPunct(s: String): String =
     s.replace(PUNCT, " $1 ").replace(Regex("\\s+"), " ").trim()
 
-  /** Malayalam chillu letters become consonant + virama, as the translator expects. */
-  private fun expandChillus(s: String): String = s
-    .replace("ൺ", "ണ്").replace("ൻ", "ന്").replace("ർ", "ര്")
-    .replace("ൽ", "ല്").replace("ൾ", "ള്").replace("ൿ", "ക്")
+  /**
+   * Malayalam chillus stay single letters, as the translator was trained (they are among its
+   * most common tokens, and its output uses them too, outside the Devanagari mapping). Only the
+   * old way of writing them, consonant + virama + zero-width joiner, is turned into those letters.
+   */
+  private fun atomicChillus(s: String): String = s
+    .replace("ണ്‍", "ൺ").replace("ന്‍", "ൻ").replace("ര്‍", "ർ")
+    .replace("ല്‍", "ൽ").replace("ള്‍", "ൾ").replace("ക്‍", "ൿ")
 
   fun toDevanagari(s: String, script: Script): String {
     if (script == Script.DEVANAGARI || script == Script.LATIN) return s

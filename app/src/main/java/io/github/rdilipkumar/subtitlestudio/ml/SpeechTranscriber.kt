@@ -1,12 +1,6 @@
 package io.github.rdilipkumar.subtitlestudio.ml
 
 import android.content.res.AssetManager
-import android.util.Log
-import com.k2fsa.sherpa.onnx.FeatureConfig
-import com.k2fsa.sherpa.onnx.OfflineModelConfig
-import com.k2fsa.sherpa.onnx.OfflineRecognizer
-import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
-import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
@@ -15,7 +9,6 @@ import io.github.rdilipkumar.subtitlestudio.core.timing.TimedWord
 import io.github.rdilipkumar.subtitlestudio.core.timing.WordTiming
 import io.github.rdilipkumar.subtitlestudio.media.AudioDecoder
 import kotlinx.coroutines.ensureActive
-import java.io.File
 import kotlin.coroutines.coroutineContext
 import kotlin.math.max
 import kotlin.math.min
@@ -27,18 +20,13 @@ import kotlin.math.min
  * 2. Speech is cut into pieces at the speaker's pauses, at most [MAX_PIECE_SEC] long. The
  *    Indian-language Whisper models were trained on short sentences: given several sentences
  *    at once they stop early and drop the rest, so pieces stay sentence-sized.
- * 3. Whisper writes each piece.
- * 4. Word times: from Whisper's own token times when it gives them; otherwise words are
+ * 3. The speech model ([SpeechEngine]) writes each piece.
+ * 4. Word times: from the model's own token times when it gives them; otherwise words are
  *    shared out only over the speaking parts of the piece, by how long each word takes to say.
  */
 class SpeechTranscriber(
   assets: AssetManager,
-  modelDir: File,
-  encoder: String,
-  decoder: String,
-  tokens: String,
-  private val language: String,
-  threads: Int = Runtime.getRuntime().availableProcessors().coerceIn(2, 4),
+  private val engine: SpeechEngine,
 ) : AutoCloseable {
 
   data class Piece(val startSample: Int, val endSample: Int, val speech: List<IntRange>)
@@ -46,37 +34,6 @@ class SpeechTranscriber(
   data class PieceResult(val text: String, val words: List<TimedWord>, val suspicious: Boolean)
 
   private val vadAssets = assets
-  private var tokenTimes = true
-  private val recognizer: OfflineRecognizer
-
-  init {
-    fun config(withTimes: Boolean) = OfflineRecognizerConfig(
-      featConfig = FeatureConfig(sampleRate = AudioDecoder.RATE, featureDim = 80),
-      modelConfig = OfflineModelConfig(
-        whisper = OfflineWhisperModelConfig(
-          encoder = File(modelDir, encoder).path,
-          decoder = File(modelDir, decoder).path,
-          language = language,
-          task = "transcribe",
-          enableTokenTimestamps = withTimes,
-        ),
-        tokens = File(modelDir, tokens).path,
-        numThreads = threads,
-        debug = false,
-        provider = "cpu",
-        modelType = "whisper",
-      ),
-      decodingMethod = "greedy_search",
-    )
-    // Token times need extra outputs some converted models do not have; fall back without them.
-    recognizer = try {
-      OfflineRecognizer(config = config(true))
-    } catch (e: Throwable) {
-      Log.w(TAG, "Token timestamps unavailable, estimating word times", e)
-      tokenTimes = false
-      OfflineRecognizer(config = config(false))
-    }
-  }
 
   /** Finds the speaking parts and groups them into pieces for Whisper. */
   fun findPieces(samples: FloatArray): List<Piece> {
@@ -151,20 +108,7 @@ class SpeechTranscriber(
   /** Writes one piece and times its words (in milliseconds from the video start). */
   suspend fun transcribe(samples: FloatArray, piece: Piece): PieceResult {
     coroutineContext.ensureActive()
-    // sherpa-onnx stops Whisper after 6 tokens per second of input. Tamil and other Indian
-    // scripts need several times that, so the words got cut off. Whisper always looks at a
-    // 30 s window anyway, so padding the piece with silence costs nothing and lifts the limit.
-    val len = piece.endSample - piece.startSample
-    val chunk = FloatArray(maxOf(len, PADDED_SAMPLES))
-    System.arraycopy(samples, piece.startSample, chunk, 0, len)
-    val stream = recognizer.createStream()
-    val result = try {
-      stream.acceptWaveform(chunk, AudioDecoder.RATE)
-      recognizer.decode(stream)
-      recognizer.getResult(stream)
-    } finally {
-      stream.release()
-    }
+    val result = engine.recognize(samples.copyOfRange(piece.startSample, piece.endSample))
     val (text, repeated) = cleanUp(result.text)
     if (text.isBlank()) return PieceResult("", emptyList(), false)
 
@@ -172,15 +116,15 @@ class SpeechTranscriber(
     val pieceEndMs = piece.endSample * 1000L / AudioDecoder.RATE
     val seconds = (piece.endSample - piece.startSample).toFloat() / AudioDecoder.RATE
     // Whisper sometimes invents text over music or silence: far too many letters for the time.
-    val suspicious = repeated || text.length > seconds * 28 + 10
+    val suspicious = repeated || text.length > seconds * engine.maxLettersPerSecond + 10
     val confidence = if (suspicious) 0.45f else 1f
 
-    val fromTokens = if (tokenTimes && !repeated && result.timestamps.size == result.tokens.size && result.tokens.isNotEmpty()) {
+    val fromTokens = if (!repeated && result.tokens.isNotEmpty() && result.tokenStartsSec.size == result.tokens.size) {
       // Only usable when the tokens join back into exactly the text (no split letters).
       WordTiming.wordsFromTokens(
         text = result.text,
-        tokens = result.tokens.toList(),
-        tokenStartsMs = result.timestamps.map { pieceStartMs + (it * 1000).toLong() },
+        tokens = result.tokens,
+        tokenStartsMs = result.tokenStartsSec.map { pieceStartMs + (it * 1000).toLong() },
         endMs = pieceEndMs,
       )
     } else {
@@ -265,15 +209,12 @@ class SpeechTranscriber(
   }
 
   override fun close() {
-    recognizer.release()
+    engine.close()
   }
 
   companion object {
-    private const val TAG = "SpeechTranscriber"
     private const val VAD_WINDOW = 512
     const val MAX_PIECE_SEC = 9f
-    /** 28 s: just under sherpa-onnx's 29.5 s Whisper limit. */
-    private const val PADDED_SAMPLES = 28 * AudioDecoder.RATE
     private const val JOIN_GAP_SEC = 0.45f
   }
 }

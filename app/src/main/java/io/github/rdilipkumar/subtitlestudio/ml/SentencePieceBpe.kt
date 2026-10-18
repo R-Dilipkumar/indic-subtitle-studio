@@ -119,6 +119,29 @@ class SentencePieceBpe private constructor(
       return SentencePieceBpe(scores, addDummyPrefix)
     }
 
+    /** Every piece of a ".model" file in id order (for turning model output ids back into text). */
+    fun pieces(file: File): List<String> {
+      val buf = ByteBuffer.wrap(file.readBytes()).order(ByteOrder.LITTLE_ENDIAN)
+      val out = ArrayList<String>()
+      while (buf.hasRemaining()) {
+        val tag = readVarint(buf).toInt()
+        if (tag ushr 3 == 1 && tag and 7 == 2) {
+          val len = readVarint(buf).toInt()
+          val end = buf.position() + len
+          var piece = ""
+          while (buf.position() < end) {
+            val t = readVarint(buf).toInt()
+            if (t ushr 3 == 1) piece = readString(buf) else skip(buf, t and 7)
+          }
+          buf.position(end)
+          out.add(piece)
+        } else {
+          skip(buf, tag and 7)
+        }
+      }
+      return out
+    }
+
     private fun readVarint(b: ByteBuffer): Long {
       var result = 0L
       var shift = 0

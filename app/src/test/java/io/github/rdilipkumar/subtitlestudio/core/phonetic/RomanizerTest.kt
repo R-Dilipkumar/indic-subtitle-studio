@@ -29,10 +29,16 @@ class RomanizerTest {
     assertEquals("vendaam", casual("வேண்டாம்"))
     assertEquals("saappaadu", casual("சாப்பாடு")) // ச at the start is "s"
     assertEquals("sri", casual("ஸ்ரீ"))
+    assertEquals("vignaanam", casual("விஞ்ஞானம்")) // ஞ்ஞ is jña, not "njnj"
+    assertEquals("muyarchi", casual("முயற்சி")) // the usual spelling (as in "Vidaamuyarchi")
   }
 
   @Test fun tamil_mixed_with_english() {
     assertEquals("idhu super aa irukku", casual("இது super ஆ இருக்கு"))
+    // Tanglish speech model output: English words stay, Tamil endings split off.
+    assertEquals("lunch finish pannittu rush aa irukku", casual("lunch finish பண்ணிட்டு rush-ஆ இருக்கு"))
+    assertEquals("Bangalore laye", casual("Bangalore-லயே"))
+    assertEquals("well-known", casual("well-known"))
   }
 
   @Test fun tamil_exact() {
@@ -63,6 +69,17 @@ class RomanizerTest {
     assertEquals("ithu", casual("ഇത്"))
   }
 
+  @Test fun malayalam_voiced_t_and_mb() {
+    assertEquals("vada", casual("വട")) // ട between vowels
+    assertEquals("naadu", casual("നാട്")) // final ട് with the short "u"
+    assertEquals("venda", casual("വേണ്ട")) // ണ്ട
+    assertEquals("undu", casual("ഉണ്ട്"))
+    assertEquals("pattam", casual("പട്ടം")) // doubled stays hard
+    assertEquals("kashtam", casual("കഷ്ടം")) // after another consonant stays hard
+    assertEquals("ambalam", casual("അമ്പലം")) // മ്പ
+    assertEquals("paapam", casual("പാപം")) // plain പ stays "p"
+  }
+
   @Test fun hindi_drops_silent_a() {
     assertEquals("namaste", casual("नमस्ते"))
     assertEquals("kamal", casual("कमल"))
@@ -72,6 +89,10 @@ class RomanizerTest {
     assertEquals("samajhnaa", casual("समझना"))
     assertEquals("zindagee", casual("ज़िंदगी"))
     assertEquals("namaste.", casual("नमस्ते।"))
+    assertEquals("satya", casual("सत्य")) // final "a" kept after a cluster ending in y/r/l/v
+    assertEquals("mantra", casual("मन्त्र"))
+    assertEquals("dharm", casual("धर्म"))
+    assertEquals("uttar", casual("उत्तर"))
   }
 
   @Test fun digits_dictionary_and_latin() {

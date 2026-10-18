@@ -14,6 +14,7 @@ import io.github.rdilipkumar.subtitlestudio.core.model.Script
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
 import io.github.rdilipkumar.subtitlestudio.core.phonetic.Romanizer
+import java.text.BreakIterator
 import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.abs
@@ -30,6 +31,11 @@ import kotlin.math.sin
  * Not thread-safe (it reuses paints): give each thread its own renderer.
  */
 class CaptionRenderer(private val fonts: FontRegistry) {
+
+  companion object {
+    /** How long one word takes to come in when words appear one by one. */
+    private const val WORD_IN_MS = 200f
+  }
 
   /** Where a caption was drawn, in video pixels, for tapping and the selection box. */
   data class Placed(
@@ -106,39 +112,29 @@ class CaptionRenderer(private val fonts: FontRegistry) {
     val t = if (static) cue.startMs + style.animMs else timeMs
 
     // Entrance and exit motion.
-    var alpha = 1f
-    var scale = 1f
-    var dy = 0f
-    if (!static && !settled && style.animMs > 0) {
-      val e = ((t - cue.startMs).toFloat() / style.animMs).coerceIn(0f, 1f)
-      val x = ((cue.endMs - t).toFloat() / style.animMs).coerceIn(0f, 1f)
-      when (style.entrance) {
-        Anim.NONE -> Unit
-        Anim.FADE -> alpha *= e
-        Anim.POP -> { scale *= 0.55f + 0.45f * easeOutBack(e); alpha *= min(1f, e * 2.5f) }
-        Anim.SLIDE_UP -> { dy += (1f - easeOutCubic(e)) * layout.baseSize * 0.9f; alpha *= e }
-        Anim.BOUNCE -> { scale *= bounce(e); alpha *= min(1f, e * 3f) }
-      }
-      when (style.exit) {
-        Anim.NONE -> Unit
-        Anim.FADE -> alpha *= x
-        Anim.POP, Anim.BOUNCE -> { scale *= 0.8f + 0.2f * x; alpha *= x }
-        Anim.SLIDE_UP -> { dy -= (1f - x) * layout.baseSize * 0.6f; alpha *= x }
-      }
+    val m = Motion()
+    if (!static && !settled) {
+      if (style.animMs > 0) comeIn(m, style.entrance, ((t - cue.startMs).toFloat() / style.animMs).coerceIn(0f, 1f), layout.baseSize, layout.halfW)
+      if (style.exitMs > 0) goOut(m, style.exit, 1f - ((cue.endMs - t).toFloat() / style.exitMs).coerceIn(0f, 1f), layout.baseSize, layout.halfW)
     }
-    if (alpha <= 0.003f) return placed(cue, tr.x * w, tr.y * h, layout, tr.scale, tr.rotation)
+    if (m.alpha <= 0.003f || m.clipTo <= m.clipFrom) return placed(cue, tr.x * w, tr.y * h, layout, tr.scale, tr.rotation)
 
     val cx = tr.x * w
     val cy = tr.y * h
-    val totalScale = tr.scale * scale
+    val totalScale = tr.scale * m.scale
     canvas.save()
-    canvas.translate(cx, cy + dy)
+    canvas.translate(cx + m.dx, cy + m.dy)
     if (tr.rotation != 0f) canvas.rotate(tr.rotation)
     canvas.scale(totalScale, totalScale)
-    val layered = alpha < 0.999f
+    if (m.clipFrom > 0f || m.clipTo < 1f) {
+      // Wipe: only part of the caption block (with room for outline and pop) is uncovered.
+      val edge = layout.halfW + layout.baseSize
+      canvas.clipRect(-edge + 2 * edge * m.clipFrom, -layout.halfH * 2f - layout.baseSize, -edge + 2 * edge * m.clipTo, layout.halfH * 2f + layout.baseSize)
+    }
+    val layered = m.alpha < 0.999f
     if (layered) {
       tmpRect.set(-layout.halfW * 1.5f, -layout.halfH * 1.6f, layout.halfW * 1.5f, layout.halfH * 1.6f)
-      canvas.saveLayerAlpha(tmpRect, (alpha * 255).toInt())
+      canvas.saveLayerAlpha(tmpRect, (m.alpha * 255).toInt())
     }
 
     // Boxes behind the text.
@@ -164,6 +160,8 @@ class CaptionRenderer(private val fonts: FontRegistry) {
       for (i in cue.words.indices) if (cue.words[i].startMs <= t) active = i
     }
 
+    val byLetter = style.reveal == RevealMode.LETTER_BY_LETTER && !static
+    val oneByOne = (style.reveal == RevealMode.WORD_BY_WORD || byLetter) && !static
     for (line in layout.lines) {
       val base = when (line.kind) {
         TrackKind.NATIVE -> style.textColor
@@ -179,58 +177,159 @@ class CaptionRenderer(private val fonts: FontRegistry) {
       stroke.color = style.strokeColor
       for (wb in line.words) {
         val wi = wb.wordIndex
-        if (wordAligned && style.reveal == RevealMode.WORD_BY_WORD && !static && wi > active) continue
+        if (wordAligned && oneByOne && wi > active) continue
         val isActive = wordAligned && wi == active && !static
         val word = if (wi >= 0) cue.words.getOrNull(wi) else null
+        // Typing: the spoken word shows only the letters said so far.
+        val shown = if (byLetter && isActive && word != null) typedPart(wb.text, t, word.startMs, word.endMs) else null
+        if (shown != null && shown.isEmpty()) continue
+        val drawn = if (shown != null) WordBox(shown, wi, wb.width).also { it.x = wb.x; it.baseline = wb.baseline } else wb
+        // Each word's own entrance, when words appear one by one.
+        val wordStart = word?.startMs ?: cue.startMs
+        val wp = if (wordAligned && style.reveal == RevealMode.WORD_BY_WORD && !static && !settled && style.wordAnim != Anim.NONE) {
+          ((t - wordStart).toFloat() / WORD_IN_MS).coerceIn(0f, 1f)
+        } else {
+          1f
+        }
+        val wordSave = if (wp < 1f) beginWordMotion(canvas, style.wordAnim, wp, wb, line) else 0
+        if (wordSave < 0) continue
         when (style.highlight) {
-          HighlightMode.NONE -> drawWord(canvas, wb, base, style, line)
-          HighlightMode.COLOR -> drawWord(canvas, wb, if (isActive) style.highlightColor else base, style, line)
+          HighlightMode.NONE -> drawWord(canvas, drawn, base, style, line)
+          HighlightMode.COLOR -> drawWord(canvas, drawn, if (isActive) style.highlightColor else base, style, line)
           HighlightMode.POP -> {
             if (isActive) {
               // Grow the spoken word, but never so much that it covers the gap to its neighbours.
-              val pop = minOf(1.14f, 1f + 1.1f * line.space / wb.width.coerceAtLeast(1f))
+              val pop = minOf(1.14f, 1f + 1.1f * line.space / drawn.width.coerceAtLeast(1f))
               canvas.save()
-              canvas.scale(pop, pop, wb.x + wb.width / 2, wb.baseline - line.size * 0.35f)
-              drawWord(canvas, wb, style.highlightColor, style, line)
+              canvas.scale(pop, pop, drawn.x + drawn.width / 2, drawn.baseline - line.size * 0.35f)
+              drawWord(canvas, drawn, style.highlightColor, style, line)
               canvas.restore()
             } else {
-              drawWord(canvas, wb, base, style, line)
+              drawWord(canvas, drawn, base, style, line)
             }
           }
           HighlightMode.BOX -> {
             if (isActive) {
               boxPaint.color = style.highlightColor
               val pad = line.size * 0.14f
-              tmpRect.set(wb.x - pad, wb.baseline + line.ascent - pad * 0.3f, wb.x + wb.width + pad, wb.baseline + line.descent + pad * 0.3f)
+              tmpRect.set(drawn.x - pad, drawn.baseline + line.ascent - pad * 0.3f, drawn.x + drawn.width + pad, drawn.baseline + line.descent + pad * 0.3f)
               canvas.drawRoundRect(tmpRect, line.size * 0.22f, line.size * 0.22f, boxPaint)
             }
-            drawWord(canvas, wb, base, style, line)
+            drawWord(canvas, drawn, base, style, line)
           }
           HighlightMode.SWEEP -> {
             if (!wordAligned || word == null || static) {
-              drawWord(canvas, wb, base, style, line)
+              drawWord(canvas, drawn, base, style, line)
             } else {
               val p = ((t - word.startMs).toFloat() / max(1L, word.endMs - word.startMs)).coerceIn(0f, 1f)
               when {
-                p >= 1f -> drawWord(canvas, wb, style.highlightColor, style, line)
-                p <= 0f -> drawWord(canvas, wb, base, style, line)
+                p >= 1f -> drawWord(canvas, drawn, style.highlightColor, style, line)
+                p <= 0f -> drawWord(canvas, drawn, base, style, line)
                 else -> {
-                  drawWord(canvas, wb, base, style, line)
+                  drawWord(canvas, drawn, base, style, line)
                   canvas.save()
-                  canvas.clipRect(wb.x - line.size, wb.baseline + line.ascent * 1.3f, wb.x + wb.width * p, wb.baseline + line.descent * 1.5f)
-                  drawWord(canvas, wb, style.highlightColor, style, line, strokeAgain = false)
+                  canvas.clipRect(drawn.x - line.size, drawn.baseline + line.ascent * 1.3f, drawn.x + drawn.width * p, drawn.baseline + line.descent * 1.5f)
+                  drawWord(canvas, drawn, style.highlightColor, style, line, strokeAgain = false)
                   canvas.restore()
                 }
               }
             }
           }
         }
+        if (wordSave > 0) canvas.restoreToCount(wordSave)
       }
     }
 
     if (layered) canvas.restore()
     canvas.restore()
     return placed(cue, cx, cy, layout, tr.scale, tr.rotation)
+  }
+
+  /** Where the caption is in its coming-in or going-out motion. */
+  private class Motion {
+    var alpha = 1f
+    var scale = 1f
+    var dx = 0f
+    var dy = 0f
+    /** Wipe: the uncovered part of the caption, from left (0) to right (1). */
+    var clipFrom = 0f
+    var clipTo = 1f
+  }
+
+  /** [e] runs 0 to 1 while the caption comes in. */
+  private fun comeIn(m: Motion, a: Anim, e: Float, size: Float, halfW: Float) {
+    val rest = 1f - easeOutCubic(e)
+    when (a) {
+      Anim.NONE -> Unit
+      Anim.FADE -> m.alpha *= e
+      Anim.POP -> { m.scale *= 0.55f + 0.45f * easeOutBack(e); m.alpha *= min(1f, e * 2.5f) }
+      Anim.SLIDE_UP -> { m.dy += rest * size * 0.9f; m.alpha *= e }
+      Anim.SLIDE_DOWN -> { m.dy -= rest * size * 0.9f; m.alpha *= e }
+      Anim.SLIDE_LEFT -> { m.dx += rest * (halfW + size); m.alpha *= e }
+      Anim.SLIDE_RIGHT -> { m.dx -= rest * (halfW + size); m.alpha *= e }
+      Anim.ZOOM -> { m.scale *= 1f + 0.7f * rest; m.alpha *= e }
+      Anim.BOUNCE -> { m.scale *= bounce(e); m.alpha *= min(1f, e * 3f) }
+      Anim.DROP -> { m.dy -= (1f - easeOutBounce(e)) * size * 2.2f; m.alpha *= min(1f, e * 4f) }
+      Anim.WIPE -> m.clipTo = min(m.clipTo, easeOutCubic(e))
+    }
+  }
+
+  /** [q] runs 0 to 1 while the caption goes out. */
+  private fun goOut(m: Motion, a: Anim, q: Float, size: Float, halfW: Float) {
+    val left = 1f - q
+    val gone = q * q * q
+    when (a) {
+      Anim.NONE -> Unit
+      Anim.FADE -> m.alpha *= left
+      Anim.POP, Anim.BOUNCE -> { m.scale *= 0.8f + 0.2f * left; m.alpha *= left }
+      Anim.SLIDE_UP -> { m.dy -= gone * size * 0.9f; m.alpha *= left }
+      Anim.SLIDE_DOWN -> { m.dy += gone * size * 0.9f; m.alpha *= left }
+      Anim.SLIDE_LEFT -> { m.dx -= gone * (halfW + size); m.alpha *= left }
+      Anim.SLIDE_RIGHT -> { m.dx += gone * (halfW + size); m.alpha *= left }
+      Anim.ZOOM -> { m.scale *= 1f + 0.5f * gone; m.alpha *= left }
+      Anim.DROP -> { m.dy += q * q * size * 2.5f; m.alpha *= left }
+      Anim.WIPE -> m.clipFrom = max(m.clipFrom, gone)
+    }
+  }
+
+  /**
+   * Starts one word's coming-in motion ([p] 0 to 1) around the word's middle. Returns the
+   * count to restore the canvas to after drawing the word, or -1 when nothing shows yet.
+   */
+  private fun beginWordMotion(canvas: Canvas, a: Anim, p: Float, wb: WordBox, line: Line): Int {
+    val m = Motion()
+    comeIn(m, a, p, line.size * 0.7f, wb.width / 2)
+    if (m.alpha <= 0.003f || m.clipTo <= 0f) return -1
+    val cx = wb.x + wb.width / 2
+    val cy = wb.baseline - line.size * 0.35f
+    val count = canvas.save()
+    canvas.translate(m.dx, m.dy)
+    if (m.scale != 1f) canvas.scale(m.scale, m.scale, cx, cy)
+    if (m.clipTo < 1f) {
+      canvas.clipRect(wb.x - line.size, wb.baseline + line.ascent * 1.4f, wb.x - line.size + (wb.width + line.size * 2) * m.clipTo, wb.baseline + line.descent * 1.6f)
+    }
+    if (m.alpha < 0.999f) {
+      tmpRect.set(wb.x - line.size, wb.baseline + line.ascent * 1.5f, wb.x + wb.width + line.size, wb.baseline + line.descent * 1.7f)
+      canvas.saveLayerAlpha(tmpRect, (m.alpha * 255).toInt())
+    }
+    return count
+  }
+
+  private val letters = BreakIterator.getCharacterInstance()
+
+  /** The letters of [text] said by [timeMs], cut between whole letters (never mid-syllable). */
+  private fun typedPart(text: String, timeMs: Long, startMs: Long, endMs: Long): String {
+    val p = ((timeMs - startMs).toFloat() / max(1L, endMs - startMs)).coerceIn(0f, 1f)
+    if (p >= 1f) return text
+    letters.setText(text)
+    var count = 0
+    while (letters.next() != BreakIterator.DONE) count++
+    val want = kotlin.math.ceil(p * count).toInt()
+    if (want >= count) return text
+    letters.first()
+    var end = 0
+    repeat(want) { end = letters.next() }
+    return text.substring(0, end)
   }
 
   private fun placed(cue: Cue, cx: Float, cy: Float, l: Layout, scale: Float, rotation: Float) =
@@ -364,6 +463,17 @@ class CaptionRenderer(private val fonts: FontRegistry) {
   }
 
   private fun easeOutCubic(x: Float): Float = 1f - (1f - x).pow(3)
+
+  private fun easeOutBounce(x: Float): Float {
+    val n = 7.5625f
+    val d = 2.75f
+    return when {
+      x < 1f / d -> n * x * x
+      x < 2f / d -> (x - 1.5f / d).let { n * it * it + 0.75f }
+      x < 2.5f / d -> (x - 2.25f / d).let { n * it * it + 0.9375f }
+      else -> (x - 2.625f / d).let { n * it * it + 0.984375f }
+    }
+  }
 
   private fun bounce(x: Float): Float =
     if (x < 0.6f) (x / 0.6f) * 1.15f else 1.15f - ((x - 0.6f) / 0.4f) * 0.15f + 0.04f * sin((x - 0.6f) / 0.4f * PI.toFloat())

@@ -176,7 +176,7 @@ private fun NewProjectCard(importing: Float?, onClick: () -> Unit) {
         } else {
           Spacer(Modifier.height(12.dp))
           Text(
-            "Auto subtitles · English letters (phonetic) · Translation\nTamil · Telugu · Kannada · Malayalam · Hindi · English",
+            "Auto subtitles · English letters (phonetic) · Translation\nTamil · Tanglish · Telugu · Kannada · Malayalam · Hindi · English",
             color = Studio.text.copy(alpha = 0.8f),
             fontSize = 12.sp,
           )

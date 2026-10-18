@@ -97,9 +97,11 @@ fun EditorScreen(projectId: String, onBack: () -> Unit, onRedo: () -> Unit) {
   var showHistory by remember { mutableStateOf(false) }
   var showExport by remember { mutableStateOf(false) }
 
-  // Follow the player smoothly, once per screen frame.
-  LaunchedEffect(player) {
-    while (true) {
+  // Follow the player smoothly, once per screen frame, while it plays. When paused nothing
+  // moves on its own, so there is no frame loop; seeks are caught by the listener below.
+  LaunchedEffect(player, playing) {
+    if (!scrubbing) positionMs = player.currentPosition
+    while (playing) {
       withFrameNanos { }
       if (!scrubbing) positionMs = player.currentPosition
     }
@@ -108,6 +110,10 @@ fun EditorScreen(projectId: String, onBack: () -> Unit, onRedo: () -> Unit) {
     val l = object : Player.Listener {
       override fun onIsPlayingChanged(isPlaying: Boolean) {
         playing = isPlaying
+      }
+
+      override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+        if (!scrubbing) positionMs = newPosition.positionMs
       }
     }
     player.addListener(l)
@@ -168,7 +174,12 @@ fun EditorScreen(projectId: String, onBack: () -> Unit, onRedo: () -> Unit) {
               if (id != null && ui.tool == null) vm.showTool(Tool.TEXT)
             },
             onDoubleTap = { id -> vm.select(id); vm.showTool(Tool.TEXT) },
-            onTransform = { t, done -> if (!ui.comparing) vm.applyTransform(t, key = if (done) "place-end" else "place") },
+            onTransform = { t, done ->
+              if (!ui.comparing) {
+                vm.applyTransform(t, key = "place")
+                if (done) vm.endGesture()
+              }
+            },
             modifier = Modifier.fillMaxSize(),
           )
         }
@@ -260,7 +271,8 @@ fun EditorScreen(projectId: String, onBack: () -> Unit, onRedo: () -> Unit) {
           if (id != null && ui.tool == null) vm.showTool(Tool.TEXT)
         },
         onRetime = { id, s, e -> vm.setTiming(id, s, e, key = "edge-$id") },
-        onMove = { id, d -> vm.move(id, d, key = "drag-$id") },
+        onMoveTo = { id, start -> vm.moveTo(id, start, key = "drag-$id") },
+        onDragEnd = vm::endGesture,
       )
       Row(
         Modifier.fillMaxWidth().background(Studio.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
@@ -290,7 +302,7 @@ fun EditorScreen(projectId: String, onBack: () -> Unit, onRedo: () -> Unit) {
             Tool.CAPTIONS -> CaptionsPanel(ui, vm, positionMs, onSeek = { player.seekTo(it) }, onRedo = onRedo)
             Tool.TEXT -> TextPanel(ui, vm, positionMs, onSeek = { player.seekTo(it) })
             Tool.STYLE -> StylePanel(ui, vm)
-            Tool.MOTION -> MotionPanel(ui, vm)
+            Tool.MOTION -> MotionPanel(ui, vm, positionMs, onPlayFrom = { player.seekTo(it); player.play() })
             Tool.TIMING -> TimingPanel(ui, vm, positionMs)
             Tool.POSITION -> PositionPanel(ui, vm)
             null -> Unit

@@ -114,7 +114,9 @@ object AudioDecoder {
       var outputDone = false
       var channels = format.getIntegerOr(MediaFormat.KEY_CHANNEL_COUNT, 1)
       var rate = format.getIntegerOr(MediaFormat.KEY_SAMPLE_RATE, 44_100)
-      var floatPcm = false
+      // Phone decoders give 16-bit or float; raw PCM tracks (some cameras record 24-bit) pass
+      // through as they are.
+      var encoding = format.getIntegerOr(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
       var resampler = StreamingResampler(rate)
       var lastProgress = 0L
       while (!outputDone) {
@@ -139,7 +141,7 @@ object AudioDecoder {
             val f = codec.outputFormat
             channels = f.getIntegerOr(MediaFormat.KEY_CHANNEL_COUNT, channels)
             rate = f.getIntegerOr(MediaFormat.KEY_SAMPLE_RATE, rate)
-            floatPcm = f.getIntegerOr(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT) == AudioFormat.ENCODING_PCM_FLOAT
+            encoding = f.getIntegerOr(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
             resampler = StreamingResampler(rate)
           }
           outIdx >= 0 -> {
@@ -148,21 +150,37 @@ object AudioDecoder {
             buf.limit(info.offset + info.size)
             buf.order(ByteOrder.nativeOrder())
             val ch = max(1, channels)
-            if (floatPcm) {
-              val fb = buf.asFloatBuffer()
-              val frames = fb.remaining() / ch
-              for (i in 0 until frames) {
-                var s = 0f
-                for (c in 0 until ch) s += fb.get()
-                resampler.push(s / ch, out)
+            when (encoding) {
+              AudioFormat.ENCODING_PCM_FLOAT -> {
+                val fb = buf.asFloatBuffer()
+                val frames = fb.remaining() / ch
+                for (i in 0 until frames) {
+                  var s = 0f
+                  for (c in 0 until ch) s += fb.get()
+                  resampler.push(s / ch, out)
+                }
               }
-            } else {
-              val sb = buf.asShortBuffer()
-              val frames = sb.remaining() / ch
-              for (i in 0 until frames) {
-                var s = 0f
-                for (c in 0 until ch) s += sb.get()
-                resampler.push(s / (ch * 32768f), out)
+              AudioFormat.ENCODING_PCM_8BIT, AudioFormat.ENCODING_PCM_24BIT_PACKED, AudioFormat.ENCODING_PCM_32BIT -> {
+                val bytes = when (encoding) {
+                  AudioFormat.ENCODING_PCM_8BIT -> 1
+                  AudioFormat.ENCODING_PCM_24BIT_PACKED -> 3
+                  else -> 4
+                }
+                val frames = buf.remaining() / (bytes * ch)
+                for (i in 0 until frames) {
+                  var s = 0f
+                  for (c in 0 until ch) s += readSample(buf, bytes)
+                  resampler.push(s / ch, out)
+                }
+              }
+              else -> {
+                val sb = buf.asShortBuffer()
+                val frames = sb.remaining() / ch
+                for (i in 0 until frames) {
+                  var s = 0f
+                  for (c in 0 until ch) s += sb.get()
+                  resampler.push(s / (ch * 32768f), out)
+                }
               }
             }
             codec.releaseOutputBuffer(outIdx, false)
@@ -181,6 +199,18 @@ object AudioDecoder {
     }
     onProgress(1f)
     out.toArray()
+  }
+
+  /** One little-endian PCM sample of [bytes] bytes (8-bit is unsigned), as -1..1. */
+  private fun readSample(b: java.nio.ByteBuffer, bytes: Int): Float = when (bytes) {
+    1 -> ((b.get().toInt() and 0xFF) - 128) / 128f
+    3 -> {
+      val lo = b.get().toInt() and 0xFF
+      val mid = b.get().toInt() and 0xFF
+      val hi = b.get().toInt()
+      ((hi shl 16) or (mid shl 8) or lo) / 8_388_608f
+    }
+    else -> b.int / 2_147_483_648f
   }
 
   private fun MediaFormat.getIntegerOr(key: String, fallback: Int): Int =

@@ -34,6 +34,15 @@ object Romanizer {
     var i = 0
     while (i < s.length) {
       val cp = s.codePointAt(i)
+      // Tanglish: an English word with a Tamil ending ("rush-ஆ", "Bangalore-லயே") reads
+      // as two words, "rush aa".
+      if (cp == '-'.code && i > 0 && i + 1 < s.length && scriptOf(s.codePointBefore(i)) == Script.LATIN &&
+        scriptOf(s.codePointAt(i + 1)).let { it != null && it != Script.LATIN }
+      ) {
+        out.append(' ')
+        i++
+        continue
+      }
       val script = scriptOf(cp)
       if (script == null || script == Script.LATIN || cp == 0x0964 || cp == 0x0965) {
         out.appendCodePoint(mapLoose(cp))
@@ -62,7 +71,12 @@ object Romanizer {
       }
       val word = s.substring(i, j)
       val fixed = dictionary[word]
-      out.append(fixed ?: romanizeRun(word, script, mode))
+      out.append(
+        fixed ?: romanizeRun(word, script, mode).let { sound ->
+          // Casual letters spell English words the English way ("சூப்பர்" is "super").
+          if (mode == PhoneticMode.CASUAL) EnglishWords.spell(sound, script) ?: sound else sound
+        },
+      )
       i = j
     }
     return out.toString()
@@ -150,7 +164,8 @@ object Romanizer {
       when {
         off == 0x3C -> if (last?.kind == Kind.CONS) last.nukta = true
         off == 0x4D -> if (last?.kind == Kind.CONS) {
-          if (last.vowel >= 0) last.halfU = true else last.vowel = DEAD
+          // A virama after a vowel sign is only real in Malayalam (old short "u"); elsewhere it is a typo.
+          if (last.vowel < 0) last.vowel = DEAD else if (script == Script.MALAYALAM) last.halfU = true
         }
         isVowelSign(off, script) -> {
           if (last?.kind == Kind.CONS && last.vowel != DEAD) {
@@ -224,6 +239,8 @@ object Romanizer {
   private val NASALS_TAMIL = setOf(0x19, 0x1E, 0x23, 0x28, 0x29, 0x2E)
   private val LIQUIDS = setOf(0x2F, 0x30, 0x32, 0x33, 0x34, 0x35)
   private val LABIALS = 0x2A..0x2E
+  /** Hindi keeps a final "a" after a cluster ending in these: सत्य "satya", मन्त्र "mantra". */
+  private val KEEP_FINAL_A = setOf(0x2F, 0x30, 0x32, 0x35)
 
   private fun consCasual(off: Int, script: Script, nukta: Boolean): String {
     // A nukta dot marks borrowed sounds (Hindi/Urdu, and English loans in Kannada).
@@ -431,7 +448,9 @@ object Romanizer {
     fun hasVowel(t: Tok) = t.kind == Kind.VOWEL || (t.kind == Kind.CONS && t.vowel != DEAD)
     val lastIdx = toks.lastIndex
     val last = toks[lastIdx]
-    if (last.kind == Kind.CONS && last.vowel == INHERENT) last.vowel = DEAD
+    val before = toks.getOrNull(lastIdx - 1)
+    val afterCluster = before?.kind == Kind.CONS && before.vowel == DEAD && last.off in KEEP_FINAL_A
+    if (last.kind == Kind.CONS && last.vowel == INHERENT && !afterCluster) last.vowel = DEAD
     for (k in syll.size - 2 downTo 1) {
       val t = toks[syll[k]]
       if (t.kind != Kind.CONS || t.vowel != INHERENT) continue
@@ -496,6 +515,8 @@ object Romanizer {
       0x19 -> if (t.vowel == DEAD && next?.kind == Kind.CONS && next.off == 0x15) "n" else "ng" // ங
       0x1E -> when { // ஞ
         t.vowel == DEAD && next?.kind == Kind.CONS && next.off == 0x1A -> "n"
+        geminateFirst -> "g" // ஞ்ஞ is Sanskrit jña: விஞ்ஞானம் = "vignaanam"
+        geminateSecond -> "n"
         initial -> "gn"
         else -> "nj"
       }
@@ -509,7 +530,13 @@ object Romanizer {
     val geminateSecond = prev?.kind == Kind.CONS && prev.vowel == DEAD && prev.off == off
     val afterN = (prev?.kind == Kind.CONS && prev.vowel == DEAD && prev.off == 0x28) ||
       (prev?.kind == Kind.CHILLU && prev.off == 0x7B)
+    val afterNasal = prev?.kind == Kind.CONS && prev.vowel == DEAD && prev.off in NASALS_TAMIL
+    val betweenVowels = prev != null && (prev.kind == Kind.VOWEL || (prev.kind == Kind.CONS && prev.vowel != DEAD))
+    // A word-final virama is the short "u" (നാട് = "naadu"), so the letter is still sounded.
+    val sounded = t.vowel != DEAD || (next == null && !t.joined)
     return when (off) {
+      0x1F -> if (sounded && (betweenVowels || afterNasal)) "d" else "t" // ട: വട = "vada", വേണ്ട = "venda", ട്ട = "tt"
+      0x2A -> if (prev?.kind == Kind.CONS && prev.vowel == DEAD && prev.off == 0x2E) "b" else "p" // മ്പ = "mb" (ambalam)
       0x31 -> when { // റ: റ്റ = "tt", ന്റ = "nt"
         geminateFirst || geminateSecond || afterN -> "t"
         else -> "r"

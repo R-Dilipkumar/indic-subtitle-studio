@@ -22,6 +22,11 @@ enum class Lang(
   val floresCode: String,
 ) {
   TAMIL("ta", "Tamil", "தமிழ்", Script.TAMIL, "tam_Taml"),
+  /**
+   * Tamil talk full of English words. Captions keep English words in English and write the
+   * Tamil in English letters: "Hi makkale vibe pannalaamaa".
+   */
+  TANGLISH("ta", "Tanglish", "Tamil + English", Script.TAMIL, "tam_Taml"),
   TELUGU("te", "Telugu", "తెలుగు", Script.TELUGU, "tel_Telu"),
   KANNADA("kn", "Kannada", "ಕನ್ನಡ", Script.KANNADA, "kan_Knda"),
   MALAYALAM("ml", "Malayalam", "മലയാളം", Script.MALAYALAM, "mal_Mlym"),
@@ -29,6 +34,9 @@ enum class Lang(
   ENGLISH("en", "English", "English", Script.LATIN, "eng_Latn");
 
   val isIndic: Boolean get() = this != ENGLISH
+
+  /** Can be picked as a language to translate into. */
+  val isTranslationTarget: Boolean get() = this != TANGLISH
 }
 
 /** How the "English letters" line is written. */
@@ -135,7 +143,33 @@ data class TrackSettings(
     TrackKind.PHONETIC -> copy(showPhonetic = visible)
     TrackKind.TRANSLATION -> copy(showTranslation = visible)
   }
+
+  /** Which of the two subtitle modes is on, or null for a custom mix. */
+  val mode: SubtitleMode?
+    get() = when {
+      showPhonetic && !showTranslation -> SubtitleMode.PHONETIC
+      showTranslation && !showPhonetic -> SubtitleMode.TRANSLATION
+      else -> null
+    }
+
+  /** Switches the subtitle mode; its line becomes the main (largest) one. The original-words line is left as it is. */
+  fun withMode(m: SubtitleMode): TrackSettings {
+    val main = if (m == SubtitleMode.PHONETIC) TrackKind.PHONETIC else TrackKind.TRANSLATION
+    return copy(
+      showPhonetic = m == SubtitleMode.PHONETIC,
+      showTranslation = m == SubtitleMode.TRANSLATION,
+      order = listOf(main) + order.filter { it != main },
+    )
+  }
 }
+
+/**
+ * What the subtitles say. PHONETIC ("phonetic bypass") writes the sounds in English letters
+ * with no translation: Hindi "क्या बात है" shows as "kya baat hai", and English words keep their
+ * English spelling. TRANSLATION shows the meaning in another language.
+ */
+@Serializable
+enum class SubtitleMode { PHONETIC, TRANSLATION }
 
 @Serializable
 enum class BoxStyle { NONE, LINES, BLOCK }
@@ -160,10 +194,16 @@ enum class RevealMode {
   ALL,
   /** Words appear one by one as they are spoken. */
   WORD_BY_WORD,
+  /** Letters type out as each word is spoken. */
+  LETTER_BY_LETTER,
 }
 
+/**
+ * How a caption (or a word) comes in or goes out. Slides are named by the direction of travel:
+ * SLIDE_UP comes in from below and leaves upwards. WIPE uncovers from the left.
+ */
 @Serializable
-enum class Anim { NONE, FADE, POP, SLIDE_UP, BOUNCE }
+enum class Anim { NONE, FADE, POP, SLIDE_UP, SLIDE_DOWN, SLIDE_LEFT, SLIDE_RIGHT, ZOOM, BOUNCE, DROP, WIPE }
 
 /**
  * The look of captions. Sizes are fractions so they look the same on any video size:
@@ -193,7 +233,12 @@ data class CaptionStyle(
   val reveal: RevealMode = RevealMode.ALL,
   val entrance: Anim = Anim.POP,
   val exit: Anim = Anim.FADE,
+  /** How long the caption takes to come in. */
   val animMs: Int = 180,
+  /** How long the caption takes to go out. */
+  val exitMs: Int = 180,
+  /** How each word comes in when words appear one by one. */
+  val wordAnim: Anim = Anim.POP,
   /** Widest a line may get before wrapping, as a fraction of the video width. */
   val maxWidth: Float = 0.86f,
   val lineSpacing: Float = 0.18f,

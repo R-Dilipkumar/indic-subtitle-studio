@@ -75,7 +75,7 @@ fun ProcessingScreen(projectId: String, onDone: () -> Unit, onBack: () -> Unit, 
       .padding(20.dp),
   ) {
     Text("Making your subtitles", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-    Text("All on this phone — no internet needed. You can leave this screen; it keeps going.", color = Studio.muted, fontSize = 13.sp)
+    Text("All on this phone — no internet needed. You can leave this screen or switch apps; it keeps going.", color = Studio.muted, fontSize = 13.sp)
     Spacer(Modifier.height(20.dp))
 
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {

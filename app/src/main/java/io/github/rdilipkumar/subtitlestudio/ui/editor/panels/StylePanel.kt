@@ -2,15 +2,22 @@ package io.github.rdilipkumar.subtitlestudio.ui.editor.panels
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.Icon
@@ -18,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,15 +33,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.rdilipkumar.subtitlestudio.App
 import io.github.rdilipkumar.subtitlestudio.core.model.BoxStyle
 import io.github.rdilipkumar.subtitlestudio.core.model.CaptionStyle
 import io.github.rdilipkumar.subtitlestudio.core.model.PhoneticMode
+import io.github.rdilipkumar.subtitlestudio.core.model.Script
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
 import io.github.rdilipkumar.subtitlestudio.data.CustomFont
+import io.github.rdilipkumar.subtitlestudio.render.FontRegistry
 import io.github.rdilipkumar.subtitlestudio.render.StylePresets
 import io.github.rdilipkumar.subtitlestudio.ui.common.ColorSwatches
 import io.github.rdilipkumar.subtitlestudio.ui.common.LabeledSlider
@@ -50,6 +62,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+/** A font button with its name written in that font. */
+@Composable
+private fun FontPill(f: FontRegistry.FontChoice, selected: Boolean, onClick: () -> Unit) {
+  val family = remember(f.id) { FontFamily(App.graph.fonts.typeface(f.id, Script.LATIN, bold = true)) }
+  val accent = Studio.accent
+  Box(
+    Modifier
+      .clip(RoundedCornerShape(50))
+      .background(if (selected) accent.copy(alpha = 0.18f) else Studio.surface2)
+      .border(1.dp, if (selected) accent else Studio.outline, RoundedCornerShape(50))
+      .clickable(onClick = onClick)
+      .padding(horizontal = 14.dp, vertical = 6.dp),
+  ) {
+    Text(f.label, fontFamily = family, fontSize = 16.sp, color = if (selected) accent else Studio.text, maxLines = 1)
+  }
+}
+
 /** Choose "all captions" or "this caption" for look and position changes. */
 @Composable
 internal fun ScopeRow(ui: EditorUi, vm: EditorViewModel) {
@@ -64,6 +93,13 @@ internal fun ScopeRow(ui: EditorUi, vm: EditorViewModel) {
   }
 }
 
+/** Tells the font list about added or removed fonts right away (not after the settings save). */
+private fun syncFonts() {
+  val g = App.graph
+  g.fonts.setCustomFonts(g.settings.value.customFonts.map { it.name to File(g.fontsDir, it.file) })
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StylePanel(ui: EditorUi, vm: EditorViewModel) {
   val st = vm.editingStyle()
@@ -88,6 +124,8 @@ fun StylePanel(ui: EditorUi, vm: EditorViewModel) {
       }
       if (name == null) vm.toast("That file is not a font the phone can read") else {
         settings.update { it.copy(customFonts = it.customFonts + CustomFont("custom:${name.second}", name.first, name.second)) }
+        syncFonts()
+        set("Font: ${name.first}") { it.copy(fontId = "custom:${name.second}") }
         vm.toast("Added font \"${name.first}\"")
       }
     }
@@ -123,10 +161,23 @@ fun StylePanel(ui: EditorUi, vm: EditorViewModel) {
       }
     }
 
-    SectionTitle("Font")
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-      for (f in App.graph.fonts.all) Pill(f.label, f.id == st.fontId, { set("Font: ${f.label}") { it.copy(fontId = f.id) } })
-      Pill("Add .ttf", false, { pickFont.launch(arrayOf("font/*", "application/x-font-ttf", "application/octet-stream", "*/*")) }, icon = Icons.Rounded.Add)
+    SectionTitle("Font", hint = "Each name is shown in its own font. Add any .ttf or .otf from your phone.")
+    val customFonts by settings.state.collectAsState()
+    val fontChoices = remember(customFonts.customFonts) { App.graph.fonts.all }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      for (f in fontChoices) FontPill(f, f.id == st.fontId) { set("Font: ${f.label}") { it.copy(fontId = f.id) } }
+    }
+    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      Pill("Add your own font", false, { pickFont.launch(arrayOf("font/*", "application/x-font-ttf", "application/x-font-otf", "application/octet-stream", "*/*")) }, icon = Icons.Rounded.Add)
+      val current = fontChoices.firstOrNull { it.id == st.fontId }
+      if (current?.custom != null) {
+        Pill("Remove this font", false, {
+          settings.update { it.copy(customFonts = it.customFonts.filterNot { c -> c.id == current.id }) }
+          syncFonts()
+          current.custom.delete()
+          set("Font: ${fontChoices.first().label}") { it.copy(fontId = CaptionStyle.FONT_DEFAULT) }
+        }, icon = Icons.Rounded.Delete)
+      }
     }
     SwitchRow("Bold", st.bold, { v -> set("Bold") { it.copy(bold = v) } })
     SwitchRow("CAPITAL English letters", st.uppercaseLatin, { v -> set("Capitals") { it.copy(uppercaseLatin = v) } })

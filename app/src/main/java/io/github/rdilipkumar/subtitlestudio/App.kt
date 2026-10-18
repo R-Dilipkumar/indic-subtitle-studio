@@ -8,6 +8,7 @@ import io.github.rdilipkumar.subtitlestudio.export.VideoExporter
 import io.github.rdilipkumar.subtitlestudio.ml.TranslationService
 import io.github.rdilipkumar.subtitlestudio.pipeline.AutoSubtitler
 import io.github.rdilipkumar.subtitlestudio.render.FontRegistry
+import io.github.rdilipkumar.subtitlestudio.work.BackgroundWork
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,12 +25,13 @@ class AppGraph(val app: Application) {
     ignoreUnknownKeys = true
     encodeDefaults = true
   }
+  val work = BackgroundWork(app)
   val projects = ProjectStore(File(app.filesDir, "projects"), json)
   val settings = SettingsStore(File(app.filesDir, "settings.json"), json, scope)
-  val models = ModelStore(app, scope)
+  val models = ModelStore(app, scope, work)
   val fonts = FontRegistry(app)
   val translation = TranslationService(models)
-  val subtitler = AutoSubtitler(app, scope, projects, models, settings, translation)
+  val subtitler = AutoSubtitler(app, scope, projects, models, settings, translation, work)
   val exporter = VideoExporter(app, fonts)
   val fontsDir: File = File(app.filesDir, "fonts").apply { mkdirs() }
 

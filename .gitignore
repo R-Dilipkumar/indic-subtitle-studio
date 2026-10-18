@@ -24,3 +24,6 @@ app/libs/*.aar
 
 # Local working notes
 session.md
+
+# Local code dump (not part of the app)
+Code.md

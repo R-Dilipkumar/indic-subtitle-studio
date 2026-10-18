@@ -2,6 +2,7 @@ package io.github.rdilipkumar.subtitlestudio.data
 
 import io.github.rdilipkumar.subtitlestudio.core.model.Lang
 import io.github.rdilipkumar.subtitlestudio.core.model.PhoneticMode
+import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
 import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,6 +31,8 @@ data class AppSettings(
   val showPhonetic: Boolean = true,
   val showTranslation: Boolean = false,
   val phoneticMode: PhoneticMode = PhoneticMode.CASUAL,
+  /** The line last picked as the main (biggest) one. */
+  val mainLine: TrackKind? = null,
   val customFonts: List<CustomFont> = emptyList(),
 )
 

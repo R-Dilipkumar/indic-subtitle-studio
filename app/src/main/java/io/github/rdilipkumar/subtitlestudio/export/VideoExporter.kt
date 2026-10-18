@@ -51,9 +51,15 @@ class VideoExporter(private val context: Context, private val fonts: FontRegistr
 
   private class CaptionsOverlay(private val doc: SubtitleDoc, fonts: FontRegistry) : CanvasOverlay(true) {
     private val renderer = CaptionRenderer(fonts)
+    private var blank = true
+
     override fun onDraw(canvas: Canvas, presentationTimeUs: Long) {
+      val timeMs = presentationTimeUs / 1000
+      // Between captions, leave the already-clear frame untouched: Media3 only re-uploads the
+      // overlay to the GPU when its bitmap changed, which saves a full-frame copy per frame.
+      if (blank && doc.cueAt(timeMs) == null) return
       canvas.drawColor(0, PorterDuff.Mode.CLEAR)
-      renderer.draw(canvas, canvas.width, canvas.height, doc, presentationTimeUs / 1000)
+      blank = renderer.draw(canvas, canvas.width, canvas.height, doc, timeMs) == null
     }
   }
 
@@ -110,10 +116,16 @@ class VideoExporter(private val context: Context, private val fonts: FontRegistr
     }
     val resolver = context.contentResolver
     val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: error("Could not save to the gallery")
-    resolver.openOutputStream(uri)!!.use { o -> file.inputStream().use { it.copyTo(o) } }
-    values.clear()
-    values.put(MediaStore.Video.Media.IS_PENDING, 0)
-    resolver.update(uri, values, null, null)
+    try {
+      resolver.openOutputStream(uri)!!.use { o -> file.inputStream().use { it.copyTo(o) } }
+      values.clear()
+      values.put(MediaStore.Video.Media.IS_PENDING, 0)
+      resolver.update(uri, values, null, null)
+    } catch (e: Throwable) {
+      // Phone full or cancelled: do not leave a half-written video in the gallery.
+      runCatching { resolver.delete(uri, null, null) }
+      throw e
+    }
     uri
   }
 
@@ -127,10 +139,15 @@ class VideoExporter(private val context: Context, private val fonts: FontRegistr
     }
     val resolver = context.contentResolver
     val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: error("Could not save the file")
-    resolver.openOutputStream(uri)!!.use { it.write(text.toByteArray(Charsets.UTF_8)) }
-    values.clear()
-    values.put(MediaStore.Downloads.IS_PENDING, 0)
-    resolver.update(uri, values, null, null)
+    try {
+      resolver.openOutputStream(uri)!!.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+      values.clear()
+      values.put(MediaStore.Downloads.IS_PENDING, 0)
+      resolver.update(uri, values, null, null)
+    } catch (e: Throwable) {
+      runCatching { resolver.delete(uri, null, null) }
+      throw e
+    }
     uri
   }
 

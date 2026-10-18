@@ -146,6 +146,7 @@ private fun PackCard(
         }
         Text(p.detail, color = Studio.muted, fontSize = 12.sp)
         Text(formatBytes(p.totalBytes), color = Studio.muted, fontSize = 12.sp)
+        p.licenseNote?.let { Text(it, color = Studio.markCheck, fontSize = 12.sp) }
       }
       if (state == PackState.Ready) Icon(Icons.Rounded.CheckCircle, "Ready", tint = Studio.green, modifier = Modifier.size(26.dp))
     }

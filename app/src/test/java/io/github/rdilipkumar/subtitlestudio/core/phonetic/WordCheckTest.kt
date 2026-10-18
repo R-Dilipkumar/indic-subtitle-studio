@@ -18,4 +18,9 @@ class WordCheckTest {
       assertFalse(w, WordCheck.looksBroken(w))
     }
   }
+
+  @Test fun malayalam_old_short_u_is_fine() {
+    assertFalse(WordCheck.looksBroken("അതു്")) // u-sign + virama, old spelling of അത്
+    assertTrue(WordCheck.looksBroken("അതാ്")) // aa-sign + virama is still wrong
+  }
 }

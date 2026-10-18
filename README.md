@@ -1,11 +1,18 @@
-# Subtitle Studio
+# Subtitle Studio — Offline Indian Subtitles
 
-**Automatic subtitles for Tamil, Telugu, Kannada, Malayalam, Hindi and English videos — with English-letters (phonetic) lines and translation — made fully offline on your Android phone.**
+**Automatic subtitles for Tamil, Tanglish, Telugu, Kannada, Malayalam, Hindi and English videos, made fully offline on your Android phone.**
 
-[![Release](https://img.shields.io/github/v/release/R-Dilipkumar/indic-subtitle-studio?include_prereleases)](https://github.com/R-Dilipkumar/indic-subtitle-studio/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-![Android 10+](https://img.shields.io/badge/Android-10%2B-3DDC84?logo=android&logoColor=white)
-![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white)
+Pick a video, pick the language, tap **Make subtitles**. Subtitle Studio listens to the video, writes what people say, can spell it in English letters ("vanakkam nanbargale") or translate it, and lets you style and fix every caption. Then it exports a new MP4 with the captions burned in, or an `.srt` file.
+
+Speech recognition and translation run on the phone. Your video is not uploaded anywhere.
+
+[![Download APK](https://img.shields.io/github/v/release/R-Dilipkumar/indic-subtitle-studio?label=Download%20APK&color=success)](https://github.com/R-Dilipkumar/indic-subtitle-studio/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/R-Dilipkumar/indic-subtitle-studio?style=social)](https://github.com/R-Dilipkumar/indic-subtitle-studio/stargazers)
+[![Android 10+](https://img.shields.io/badge/Android-10%2B-brightgreen.svg)](https://developer.android.com)
+[![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white)](https://developer.android.com/jetpack/compose)
+[![Speech: Whisper + sherpa-onnx](https://img.shields.io/badge/Speech-Whisper%20%2B%20sherpa--onnx-orange.svg)](https://github.com/k2-fsa/sherpa-onnx)
+[![Translation: IndicTrans2](https://img.shields.io/badge/Translation-IndicTrans2-blue.svg)](https://github.com/AI4Bharat/IndicTrans2)
 
 <p>
   <img src="docs/images/setup.png" width="200" alt="Choose language, lines and look">
@@ -14,47 +21,66 @@
   <img src="docs/images/history.png" width="200" alt="Edit history">
 </p>
 
-## Features
+## Why Subtitle Studio
 
-- **Auto subtitles, offline.** Speech-to-text runs on the phone with Whisper models tuned for each Indian language. No upload, no account, no internet needed after setup.
-- **Three lines, any mix:**
-  - the words in their own script (தமிழ், తెలుగు, ಕನ್ನಡ, മലയാളം, हिन्दी),
-  - the same words **in English letters, by sound** — chat style (`vanakkam nanbargale`) or exact with accent marks (`vaṇakkam naṇparkaḷē`),
-  - a **translation** (Indian languages ↔ English, offline with AI4Bharat IndicTrans2).
-- **Karaoke-style timing.** The word being spoken can pop, change colour, sweep, get a box, or appear one by one.
-- **A safe sandbox.** Your video is copied into the app. Every edit happens on the copy; exports are new files. Your original is never touched.
-- **See every edit.** Captions are colour-coded on the timeline and list: *AI made*, *You edited*, *You added*, *Please check* (words the AI likely got wrong) and *Translation out of date*. Hold **Compare** to see what the AI made. **History** lists every change; tap any step to go back. Full undo/redo.
-- **Edit everything:**
-  - fix any word, its English-letters spelling, or the translation,
-  - teach the app a spelling once ("Always spell this word this way"),
-  - split and join captions, add new ones, find and replace,
-  - drag caption edges on the timeline to retime, nudge words, shift all captions earlier/later,
-  - rebuild captions as 1 word / 2–3 words / one line / full sentence,
-  - drag, pinch and twist captions on the video, with centre snapping and Reels/Shorts/TikTok safe zones,
-  - 8 ready-made looks, fonts with matching Indian-script designs (Baloo, Anek), your own `.ttf`, colours, outline, shadow, boxes, motion,
-  - change one caption or all of them.
-- **Export:** an MP4 with the captions burned in (exactly as in the preview), or `.srt`, `.vtt` and `.ass` files (ASS keeps colours, position and karaoke timing).
+Most caption apps send your video to a server, charge per minute, and get Indian languages wrong, or only do Hindi. Subtitle Studio is different:
+
+- **Made for South Indian creators.** Speech models tuned for Tamil, Telugu, Kannada and Malayalam, plus **Tanglish** (Tamil talk full of English words) where English words come out in English.
+- **English letters, by sound.** "Hi makkale vibe pannalaamaa" instead of a translation, so anyone can read along. Casual chat style or exact with accent marks.
+- **Fully on the phone.** No account, no upload, no per-minute fees. Works without internet once the language pack is downloaded.
+- **Your video is safe.** All edits happen on a copy. Exports are new files.
+- **See it before you make it.** A live preview plays your chosen lines, caption size and look while you pick them.
+- **Free and open source** under the MIT license.
+
+If Subtitle Studio is useful to you, please give it a ⭐ — it helps other creators find it.
 
 ## Download
 
 Get the APK from the [latest release](https://github.com/R-Dilipkumar/indic-subtitle-studio/releases/latest):
 
-- `SubtitleStudio-v0.1.0-arm64-v8a.apk` — almost every phone from the last 6+ years (about 31 MB)
-- `SubtitleStudio-v0.1.0-universal.apk` — if you are not sure (about 76 MB)
-- `SubtitleStudio-v0.1.0-armeabi-v7a.apk` — older 32-bit phones
+| File | For |
+|---|---|
+| `SubtitleStudio-v0.2.0-arm64-v8a.apk` | Almost every phone from the last 6+ years (about 32 MB) |
+| `SubtitleStudio-v0.2.0-universal.apk` | If you are not sure (about 77 MB) |
+| `SubtitleStudio-v0.2.0-armeabi-v7a.apk` | Older 32-bit phones |
 
-Open the file on your phone and allow "install unknown apps" when asked.
+Open the file on your phone and allow "install unknown apps" when asked. Updating from an older version keeps your projects.
 
-## Setup
+## How to use
 
-1. Open the app and tap **Language packs**.
-2. Download the speech pack for your language once (on Wi-Fi), and the translation pack if you want translations.
-   No internet at all? Copy the pack's files (or a `.zip` of them) to the phone and use **Import files**.
-3. Tap **New project**, pick a video, choose what you want, and tap **Make subtitles**.
+1. **Start a project.** Tap **New project** and pick a video.
+2. **Spoken language.** Tap the language card and choose what people speak. Each language shows what it is for, how accurate it is and whether its pack is on the phone. Tamil with lots of English words? Choose **Tanglish**.
+3. **What the subtitles show.** Pick the main line:
+   - **How it sounds** — the words in English letters, not a translation (`vanakkam nanbargale`).
+   - **What it means** — a translation into English or another Indian language.
+   - **Original script** — the words in தமிழ், తెలుగు, ಕನ್ನಡ, മലയാളം or हिन्दी.
 
-| Pack | Size | Quality |
-| --- | --- | --- |
+   Then add more lines under it if you like, and pick **Casual** or **Exact** spelling.
+4. **Caption size and look.** 1 word, 2–3 words, one line or a full sentence; then a ready-made look. The live preview at the top plays every change. Tap it to see the whole frame.
+5. **Make subtitles.** The first time, the app asks to download the language pack (on Wi-Fi). Work keeps going if you switch apps.
+6. **Fix and style.** Tap any caption to fix a word, its spelling or the translation. Drag captions on the video, retime them on the timeline, change fonts, colours and motion.
+7. **Export.** An MP4 with captions burned in, or `.srt`, `.vtt` and `.ass` files.
+
+## Features
+
+- **Auto subtitles, offline** with Whisper models tuned for each Indian language, and a Tanglish model that keeps English words in English.
+- **Three lines, any mix:** original script, English letters (phonetic) and a translation. Choose which is the big main line.
+- **Karaoke-style timing.** The word being spoken can pop, change colour, sweep, get a box, appear word by word or type out letter by letter.
+- **Motion:** pop, bounce, slide, zoom, drop, wipe and fade, with separate in and out speeds, and a per-word entrance.
+- **See every edit.** Captions are colour-coded: *AI made*, *You edited*, *You added*, *Please check* (words the AI likely got wrong) and *Translation out of date*. Hold **Compare** to see what the AI made. **History** lists every change; tap any step to go back.
+- **Edit everything:** fix words, teach the app a spelling once ("Always spell this word this way"), split and join captions, find and replace, shift all captions, rebuild captions by size, drag/pinch/twist captions with Reels/Shorts/TikTok safe zones.
+- **Edit outside the app:** get an `.srt` to fix on a computer, then load it back. Your looks and positions stay.
+- **10 ready-made looks** and bold display fonts with matching Indian-script designs (Baloo, Anek), plus your own `.ttf`.
+- **Export:** MP4 with burned-in captions (exactly as the preview), or `.srt`, `.vtt` and `.ass` (ASS keeps colours, position and karaoke timing).
+
+## Language packs
+
+Packs download once inside the app (Language packs screen), or can be copied to the phone and added with **Import files** if you have no internet.
+
+| Pack | Size | Accuracy |
+|---|---|---|
 | Tamil speech (Whisper small, IIT Madras) | 375 MB | Good |
+| Tanglish speech (Thedal AED, Tamil + English) | 126 MB | Good |
 | Malayalam speech (Whisper small, Kavya Manohar) | 375 MB | Good |
 | Hindi speech (Whisper small, IIT Madras) | 375 MB | Good |
 | Telugu speech (Whisper tiny, IIT Madras) | 103 MB | Basic |
@@ -67,21 +93,34 @@ English letters (phonetic) need no pack: they are built into the app.
 
 ## How it works
 
-1. The sound is pulled out of the video with the phone's own decoders and turned into 16 kHz audio.
-2. A voice detector (Silero) finds where people speak and cuts the speech at pauses into sentence-sized pieces.
-3. Whisper (via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)) writes each piece. Words are timed across the speaking parts by how long each takes to say.
-4. Words are grouped into captions of the size you chose, never across a pause or a sentence end.
-5. The English-letters line is made by a built-in rule engine for each script, including the sound changes the letters do not show (Tamil க is "k" in *kaadhal* but "g" in *magan*; Hindi कमल is *kamal*, not *kamala*).
-6. Translation runs sentence by sentence with IndicTrans2 on ONNX Runtime.
-7. The editor preview and the video export use the same caption drawing code, and export uses Media3 Transformer on the phone's video hardware.
+```mermaid
+flowchart LR
+    A[Video] --> B[Sound to 16 kHz audio]
+    B --> C[Voice detector<br/>cuts speech at pauses]
+    C --> D[Speech model<br/>Whisper or Thedal]
+    D --> E[Words grouped<br/>into captions]
+    E --> F[English letters<br/>built-in rules]
+    E --> G[Translation<br/>IndicTrans2]
+    F --> H[Editor]
+    G --> H
+    H --> I[MP4 or .srt export]
+```
+
+- The sound is pulled out with the phone's own decoders. Silero VAD finds speech and cuts it at pauses.
+- Each piece goes to the speech model via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Whisper) or ONNX Runtime (Thedal, for Tanglish).
+- Words are grouped into captions of the size you chose, never across a pause or a sentence end.
+- The English-letters line comes from a built-in rule engine for each script, including sound changes the letters don't show (Tamil க is "k" in *kaadhal* but "g" in *magan*). Common English words said in Tamil are spelled the English way.
+- Translation runs sentence by sentence with IndicTrans2 on ONNX Runtime.
+- The editor preview and the export use the same caption drawing code; export uses Media3 Transformer on the phone's video hardware.
 
 ## Good to know
 
 - **The AI makes mistakes**, more with fast, slangy or noisy speech. Words that look wrong by spelling rules are marked *Please check*. Telugu and Kannada use smaller models for now, so expect more fixes there.
-- Making subtitles takes a few times the video's length (in testing, a 20-second clip took about a minute). Keep the app open while it works.
-- History (undo) covers the current editing session; your latest captions are always saved.
+- **Tanglish model licence:** free for personal, non-commercial use only. Ask the model's author before using it for paid or sponsored videos.
+- Making subtitles takes a few times the video's length on most phones.
 - Translating between two Indian languages goes through English, so it needs both translation packs.
-- The phone needs Android 10 or newer.
+- Undo history covers the current editing session; your latest captions are always saved.
+- Needs Android 10 or newer.
 
 ## Build from source
 
@@ -93,8 +132,7 @@ cd indic-subtitle-studio
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 ```
 
-The first build downloads the sherpa-onnx library (about 39 MB) from its GitHub release into `app/libs/`.
-For a signed release build, create `keystore.properties` next to `settings.gradle.kts`:
+The first build downloads the sherpa-onnx library (about 39 MB) into `app/libs/`. For a signed release build, create `keystore.properties` next to `settings.gradle.kts`:
 
 ```properties
 storeFile=your-release-key.jks
@@ -105,12 +143,16 @@ keyPassword=...
 
 then run `./gradlew :app:assembleRelease`. APKs land in `app/build/outputs/apk/`.
 
+## Contributing
+
+Bug reports, wrong spellings in English letters and pull requests are welcome. Please run `./gradlew :app:testDebugUnitTest` before opening a pull request.
+
 ## Credits
 
-- Speech: [OpenAI Whisper](https://github.com/openai/whisper) fine-tunes by [vasista22 (IIT Madras Speech Lab)](https://huggingface.co/vasista22) and [Kavya Manohar](https://huggingface.co/kavyamanohar), packed by [ippocode](https://huggingface.co/ippocode/indic-asr-onnx); runtime [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0); voice detector [Silero VAD](https://github.com/snakers4/silero-vad) (MIT).
+- Speech: [OpenAI Whisper](https://github.com/openai/whisper) fine-tunes by [vasista22 (IIT Madras Speech Lab)](https://huggingface.co/vasista22) and [Kavya Manohar](https://huggingface.co/kavyamanohar), packed by [ippocode](https://huggingface.co/ippocode/indic-asr-onnx); Tanglish model [Thedal AED by Badri0510](https://huggingface.co/Badri0510/Thedal-AED-Tamil-Tanglish-English-INT4-ConvINT8-ONNX); runtime [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache-2.0); voice detector [Silero VAD](https://github.com/snakers4/silero-vad) (MIT).
 - Translation: [AI4Bharat IndicTrans2](https://github.com/AI4Bharat/IndicTrans2) (MIT), ONNX by [Hari31416](https://huggingface.co/hari31416); runtime [ONNX Runtime](https://onnxruntime.ai) (MIT).
-- Fonts: Baloo 2 family, Anek, Poppins, Montserrat, Bebas Neue from Google Fonts (SIL Open Font License).
+- Fonts from Google Fonts: Baloo 2, Anek, Poppins, Montserrat, Bebas Neue, Anton, Bangers, Lilita One, Archivo Black (SIL Open Font License); Luckiest Guy, Permanent Marker (Apache-2.0). See `app/src/main/assets/fonts/NOTICE.txt`.
 
 ## License
 
-MIT © 2026 Dilipkumar R. See [LICENSE](LICENSE). Downloaded models keep their own licences (Apache-2.0 and MIT, listed above).
+Subtitle Studio's code is released under the [MIT License](LICENSE) © 2026 Dilipkumar R. Downloaded models keep their own licences (MIT, Apache-2.0, and the Tanglish model's non-commercial licence, listed above).

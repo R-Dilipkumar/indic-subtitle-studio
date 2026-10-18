@@ -1,5 +1,6 @@
 package io.github.rdilipkumar.subtitlestudio.core.edit
 
+import io.github.rdilipkumar.subtitlestudio.core.format.SubtitleFormats
 import io.github.rdilipkumar.subtitlestudio.core.model.CaptionStyle
 import io.github.rdilipkumar.subtitlestudio.core.model.Cue
 import io.github.rdilipkumar.subtitlestudio.core.model.Origin
@@ -155,32 +156,39 @@ object DocOps {
   // ---------------------------------------------------------------------------------------
   // Structure
 
-  /** Splits a caption after word [afterWordIndex]. */
+  /**
+   * Splits a caption after word [afterWordIndex]. A caption too short for two halves may grow
+   * into free time after it, but never into the next caption; with no room it is left alone.
+   */
   fun splitCue(doc: SubtitleDoc, cueId: String, afterWordIndex: Int, ids: IdGen): SubtitleDoc {
     val i = doc.indexOf(cueId)
     if (i < 0) return doc
     val cue = doc.cues[i]
     if (afterWordIndex !in 0 until cue.words.lastIndex) return doc
+    val nextStart = doc.cues.getOrNull(i + 1)?.startMs ?: Long.MAX_VALUE
+    val end = max(cue.endMs, min(nextStart, cue.startMs + 2 * MIN_CUE_MS))
+    if (end - cue.startMs < 2 * MIN_CUE_MS) return doc
     val a = cue.words[afterWordIndex]
     val b = cue.words[afterWordIndex + 1]
-    val cut = if (b.startMs > a.endMs) (a.endMs + b.startMs) / 2 else a.endMs
+    val gapMid = if (b.startMs > a.endMs) (a.endMs + b.startMs) / 2 else a.endMs
+    val cut = gapMid.coerceIn(cue.startMs + MIN_CUE_MS, end - MIN_CUE_MS)
     val stale = if (cue.translation.isNotEmpty()) TranslationState.STALE else TranslationState.NONE
     val first = cue.copy(
-      endMs = max(cut, cue.startMs + MIN_CUE_MS),
+      endMs = cut,
       words = cue.words.subList(0, afterWordIndex + 1),
       translationState = stale,
       edited = true,
     )
     val second = cue.copy(
       id = ids.next(),
-      startMs = first.endMs,
+      startMs = cut,
+      endMs = end,
       words = cue.words.subList(afterWordIndex + 1, cue.words.size),
       translation = "",
-      translationState = if (cue.translation.isNotEmpty()) TranslationState.STALE else TranslationState.NONE,
+      translationState = stale,
       edited = true,
     )
-    val fixedSecond = second.copy(endMs = max(second.endMs, second.startMs + MIN_CUE_MS))
-    return doc.copy(cues = doc.cues.toMutableList().apply { set(i, first); add(i + 1, clampWords(fixedSecond)) })
+    return doc.copy(cues = doc.cues.toMutableList().apply { set(i, clampWords(first)); add(i + 1, clampWords(second)) })
   }
 
   /** Splits at the word gap nearest to [timeMs]. */
@@ -261,19 +269,62 @@ object DocOps {
    * its fixes. Translations no longer match the new captions, so they are cleared.
    */
   fun regroup(doc: SubtitleDoc, length: CaptionLength, ids: IdGen): SubtitleDoc {
+    // Same filter and (stable) order as CueBuilder.build, so its words line up one to one.
     val all = doc.cues.flatMap { c -> c.words.mapIndexed { k, w -> Triple(c, k, w) } }
+      .filter { it.third.text.isNotBlank() }
+      .sortedBy { it.third.startMs }
     if (all.isEmpty()) return doc
-    val byText = HashMap<Long, Word>()
     val timed = all.map { (c, k, w) ->
-      byText[w.startMs * 31 + w.text.hashCode()] = w
       TimedWord(w.text, w.startMs, w.endMs, w.confidence, breakAfter = k == c.words.lastIndex && c.origin == Origin.USER)
     }
     val rebuilt = CueBuilder.build(timed, length, { it }, ids)
-    // Put the original word objects back (keeps ids, spellings and edit marks).
+    // Put the original word objects back, in order (keeps ids, spellings and edit marks).
+    var next = 0
     val cues = rebuilt.map { c ->
-      c.copy(
-        words = c.words.map { nw -> byText[nw.startMs * 31 + nw.text.hashCode()] ?: nw },
-        edited = c.words.any { nw -> byText[nw.startMs * 31 + nw.text.hashCode()]?.edited == true },
+      val words = c.words.map { all[next++].third }
+      c.copy(words = words, edited = words.any { it.edited })
+    }
+    return doc.copy(cues = cues)
+  }
+
+  /**
+   * Replaces the captions with ones edited outside the app (an .srt the user changed), keeping
+   * the look: each new caption takes the own look, position and translation of the old caption
+   * it overlaps most. A changed caption's translation is marked out of date. When the edited
+   * lines are in English letters ([phoneticEdit]), they become both lines as typed.
+   */
+  fun loadEdited(doc: SubtitleDoc, edited: List<SubtitleFormats.ParsedCue>, ph: Phonetic, ids: IdGen, phoneticEdit: Boolean): SubtitleDoc {
+    // Keep the doc's rules even if the file breaks them: sorted, no overlaps, not too short.
+    val fixed = ArrayList<Triple<Long, Long, String>>()
+    for (p in edited.sortedBy { it.startMs }) {
+      val text = p.lines.joinToString(" ").trim()
+      if (text.isEmpty()) continue
+      val start = max(p.startMs, fixed.lastOrNull()?.second ?: 0L)
+      fixed.add(Triple(start, max(p.endMs, start + MIN_CUE_MS), text))
+    }
+    val cues = fixed.map { (start, end, text) ->
+      val parts = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
+      val times = WordTiming.spreadWords(parts, start, end)
+      val before = doc.cues.maxByOrNull { min(it.endMs, end) - max(it.startMs, start) }
+        ?.takeIf { min(it.endMs, end) > max(it.startMs, start) }
+      val same = before != null && (if (phoneticEdit) before.phonetic else before.text) == parts.joinToString(" ")
+      Cue(
+        id = ids.next(),
+        startMs = start,
+        endMs = end,
+        words = parts.mapIndexed { k, w ->
+          Word(ids.next(), w, if (phoneticEdit) w else ph.of(w), times[k].first, times[k].second, phoneticByUser = phoneticEdit, edited = !same)
+        },
+        translation = before?.translation ?: "",
+        translationState = when {
+          before == null || before.translation.isEmpty() -> TranslationState.NONE
+          same -> before.translationState
+          else -> TranslationState.STALE
+        },
+        origin = Origin.IMPORTED,
+        edited = !same,
+        style = before?.style,
+        transform = before?.transform,
       )
     }
     return doc.copy(cues = cues)

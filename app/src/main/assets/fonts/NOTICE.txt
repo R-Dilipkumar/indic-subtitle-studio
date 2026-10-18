@@ -1,0 +1,16 @@
+Fonts bundled with Subtitle Studio (all from Google Fonts, free to use and ship in apps)
+
+SIL Open Font License 1.1 (full text: OFL.txt)
+- Baloo 2 family (Thambi, Tammudu, Tamma, Chettan): Copyright 2019 The Baloo 2 Project Authors
+- Anek family (Tamil, Telugu, Kannada, Malayalam): Copyright The Anek Project Authors
+- Poppins: Copyright 2020 The Poppins Project Authors
+- Montserrat: Copyright 2011 The Montserrat Project Authors
+- Bebas Neue: Copyright 2010 by Dharma Type
+- Anton: Copyright 2020 The Anton Project Authors
+- Bangers: Copyright 2010 The Bangers Project Authors
+- Lilita One: Copyright (c) 2011 Juan Montoreano
+- Archivo Black: Copyright 2017 The Archivo Black Project Authors
+
+Apache License 2.0 (full text: APACHE-2.0.txt)
+- Luckiest Guy: Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI)
+- Permanent Marker: Copyright (c) 2010 by Font Diner, Inc.

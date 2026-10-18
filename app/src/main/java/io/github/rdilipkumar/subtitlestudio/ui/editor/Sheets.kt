@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Subtitles
@@ -48,7 +49,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleMode
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
+import io.github.rdilipkumar.subtitlestudio.ui.common.Pill
 import io.github.rdilipkumar.subtitlestudio.export.VideoExporter
 import io.github.rdilipkumar.subtitlestudio.ui.theme.Studio
 
@@ -108,6 +113,13 @@ fun HistorySheet(ui: EditorUi, vm: EditorViewModel, onClose: () -> Unit) {
       Spacer(Modifier.height(24.dp))
     }
   }
+}
+
+/** Opens the phone's file picker for an edited .srt / .vtt and loads it into the project. */
+@Composable
+fun rememberEditedFilePicker(vm: EditorViewModel): () -> Unit {
+  val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) vm.loadEdited(uri) }
+  return { launcher.launch(arrayOf("application/x-subrip", "text/vtt", "text/plain", "text/*", "application/octet-stream", "*/*")) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -174,6 +186,28 @@ fun ExportSheet(ui: EditorUi, vm: EditorViewModel, onClose: () -> Unit, onOpen: 
                 }
               }
               Text("ASS keeps colours, position and karaoke timing.", color = Studio.muted, fontSize = 11.sp)
+            }
+          }
+          var editLine by remember { mutableStateOf(if (ui.doc.tracks.mode == SubtitleMode.PHONETIC && ui.language.isIndic) TrackKind.PHONETIC else TrackKind.NATIVE) }
+          val loadEdited = rememberEditedFilePicker(vm)
+          ExportCard(
+            icon = Icons.Rounded.EditNote,
+            title = "Edit the words outside the app",
+            detail = "Get the captions as a text file (.srt), fix the words in any app (notes, a computer, an AI chat), then load the file back. Your look, effects and positions stay.",
+          ) {
+            Column {
+              if (ui.language.isIndic) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                  Pill("Original words", editLine == TrackKind.NATIVE, { editLine = TrackKind.NATIVE })
+                  Pill("English letters", editLine == TrackKind.PHONETIC, { editLine = TrackKind.PHONETIC })
+                }
+                Spacer(Modifier.height(8.dp))
+              }
+              Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { vm.exportForEditing(editLine) }) { Text("1. Get .srt to edit") }
+                OutlinedButton(onClick = loadEdited) { Text("2. Load edited file") }
+              }
+              Text("Change only the words; keep the numbers and times as they are.", color = Studio.muted, fontSize = 11.sp)
             }
           }
         }

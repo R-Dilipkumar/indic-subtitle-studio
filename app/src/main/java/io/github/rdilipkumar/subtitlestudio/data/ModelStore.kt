@@ -3,6 +3,7 @@ package io.github.rdilipkumar.subtitlestudio.data
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import io.github.rdilipkumar.subtitlestudio.work.BackgroundWork
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,7 +35,7 @@ sealed interface PackState {
  * an HTTP Range request), and finished files are checked against their exact size.
  * Packs can also be imported from files the user copied to the phone, for zero internet.
  */
-class ModelStore(private val context: Context, private val scope: CoroutineScope) {
+class ModelStore(private val context: Context, private val scope: CoroutineScope, private val work: BackgroundWork) {
 
   val root: File = (context.getExternalFilesDir("models") ?: File(context.filesDir, "models")).apply { mkdirs() }
 
@@ -49,15 +50,25 @@ class ModelStore(private val context: Context, private val scope: CoroutineScope
 
   fun bytesOnDisk(): Long = root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
 
+  /** Ready only when every file is there at its exact size: a cut-off model file crashes the engine. */
   private fun stateOnDisk(pack: ModelPack): PackState =
-    if (pack.files.all { File(File(root, pack.id), it.name).let { f -> f.isFile && f.length() > 0 } }) PackState.Ready
+    if (pack.files.all { pf -> File(File(root, pack.id), pf.name).let { f -> f.isFile && sizeOk(pf, f.length()) } }) PackState.Ready
     else PackState.Missing
+
+  private fun sizeOk(pf: PackFile, length: Long): Boolean = if (pf.bytes > 0) length == pf.bytes else length > 0
+
+  /** Puts a finished temp file in place (some storage refuses to rename over an existing file). */
+  private fun moveInto(tmp: File, dest: File): Boolean {
+    if (dest.exists()) dest.delete()
+    return tmp.renameTo(dest)
+  }
 
   private fun set(pack: ModelPack, s: PackState) = _states.update { it + (pack.id to s) }
 
   fun download(pack: ModelPack) {
     if (jobs[pack.id]?.isActive == true || isReady(pack)) return
     set(pack, PackState.Downloading(0, pack.totalBytes))
+    work.begin("pack-${pack.id}", "Downloading ${pack.title}")
     jobs[pack.id] = scope.launch(Dispatchers.IO) {
       val total = pack.totalBytes
       try {
@@ -85,6 +96,8 @@ class ModelStore(private val context: Context, private val scope: CoroutineScope
         throw e
       } catch (e: Exception) {
         set(pack, PackState.Failed(e.message ?: "Download failed"))
+      } finally {
+        work.end("pack-${pack.id}")
       }
     }
   }
@@ -117,7 +130,7 @@ class ModelStore(private val context: Context, private val scope: CoroutineScope
       part.delete()
       throw IOException("${pf.name} came out the wrong size; please try again")
     }
-    if (!part.renameTo(dest)) throw IOException("Could not save ${pf.name}")
+    if (!moveInto(part, dest)) throw IOException("Could not save ${pf.name}")
   }
 
   private suspend fun fetchInto(pf: PackFile, part: File, onBytes: (Long) -> Unit) {
@@ -178,7 +191,7 @@ class ModelStore(private val context: Context, private val scope: CoroutineScope
               if (!e.isDirectory && base in wanted) {
                 val tmp = File(dir(pack), "$base.part")
                 FileOutputStream(tmp).use { zip.copyTo(it) }
-                if (tmp.renameTo(file(pack, base))) found.add(base)
+                if (keep(wanted.getValue(base), tmp)) found.add(base)
               }
             }
           }
@@ -186,11 +199,20 @@ class ModelStore(private val context: Context, private val scope: CoroutineScope
       } else if (name in wanted) {
         val tmp = File(dir(pack), "$name.part")
         context.contentResolver.openInputStream(uri)?.use { input -> FileOutputStream(tmp).use { input.copyTo(it) } }
-        if (tmp.renameTo(file(pack, name))) found.add(name)
+        if (keep(wanted.getValue(name), tmp)) found.add(name)
       }
     }
     set(pack, stateOnDisk(pack))
     found.size
+  }
+
+  /** Keeps an imported file only if it is the right size (a wrong one is not counted as found). */
+  private fun keep(pf: PackFile, tmp: File): Boolean {
+    if (!tmp.isFile || !sizeOk(pf, tmp.length())) {
+      tmp.delete()
+      return false
+    }
+    return moveInto(tmp, File(tmp.parentFile, pf.name))
   }
 
   private fun displayName(uri: Uri): String? =

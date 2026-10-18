@@ -4,6 +4,9 @@ import io.github.rdilipkumar.subtitlestudio.core.model.Lang
 
 enum class PackKind { SPEECH, TRANSLATE }
 
+/** Which speech engine runs a speech pack. */
+enum class SpeechEngineKind { WHISPER, THEDAL }
+
 data class PackFile(val name: String, val url: String, val bytes: Long)
 
 /**
@@ -27,6 +30,9 @@ data class ModelPack(
   val encoderFile: String = "",
   val decoderFile: String = "",
   val tokensFile: String = "",
+  val engine: SpeechEngineKind = SpeechEngineKind.WHISPER,
+  /** Shown on the pack when its licence limits how it may be used. */
+  val licenseNote: String? = null,
 ) {
   val totalBytes: Long get() = files.sumOf { it.bytes }
 }
@@ -37,6 +43,8 @@ object ModelCatalog {
   private const val WHISPER_EN = "https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base.en/resolve/main"
   private const val IT2_IN_EN = "https://huggingface.co/hari31416/indictrans2-indic-en-dist-200M-ONNX-int8/resolve/main"
   private const val IT2_EN_IN = "https://huggingface.co/hari31416/indictrans2-en-indic-dist-200M-ONNX-int8/resolve/main"
+  // Pinned to one commit so the files (and their exact sizes) never change under us.
+  private const val THEDAL = "https://huggingface.co/Badri0510/Thedal-AED-Tamil-Tanglish-English-INT4-ConvINT8-ONNX/resolve/5bef57f299826a95e532616da18ebe7933232b4b"
 
   private fun indicWhisper(
     id: String,
@@ -69,6 +77,24 @@ object ModelCatalog {
   val speech: Map<Lang, ModelPack> = mapOf(
     Lang.TAMIL to indicWhisper("speech-ta", "whisper-small-ta", Lang.TAMIL, small = true, by = "IIT Madras"),
     Lang.MALAYALAM to indicWhisper("speech-ml", "whisper-small-ml", Lang.MALAYALAM, small = true, by = "Kavya Manohar"),
+    Lang.TANGLISH to ModelPack(
+      id = "speech-ta-en",
+      kind = PackKind.SPEECH,
+      title = "Tanglish speech",
+      detail = "Thedal AED by Badri0510: Tamil talk with English words, English words kept in English",
+      quality = "Good",
+      languages = listOf(Lang.TANGLISH),
+      files = listOf(
+        PackFile("frontend.onnx", "$THEDAL/frontend.onnx", 1_148_875L),
+        PackFile("encoder.onnx", "$THEDAL/encoder.onnx", 97_998_061L),
+        PackFile("decoder_step.onnx", "$THEDAL/decoder_step.onnx", 26_771_888L),
+        PackFile("tokenizer.model", "$THEDAL/tokenizer.model", 272_494L),
+        PackFile("config.json", "$THEDAL/config.json", 674L),
+        PackFile("LICENSE", "$THEDAL/LICENSE", 2_166L),
+      ),
+      engine = SpeechEngineKind.THEDAL,
+      licenseNote = "Free for personal, non-commercial use only (model licence). Ask the model's author before using it for paid or sponsored videos.",
+    ),
     Lang.TELUGU to indicWhisper("speech-te", "whisper-tiny-te", Lang.TELUGU, small = false, by = "IIT Madras"),
     Lang.KANNADA to indicWhisper("speech-kn", "whisper-tiny-kn", Lang.KANNADA, small = false, by = "IIT Madras"),
     Lang.HINDI to indicWhisper("speech-hi", "whisper-small-hi", Lang.HINDI, small = true, by = "IIT Madras"),

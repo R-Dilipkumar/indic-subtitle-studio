@@ -1,6 +1,7 @@
 package io.github.rdilipkumar.subtitlestudio.pipeline
 
 import android.content.Context
+import android.util.Log
 import io.github.rdilipkumar.subtitlestudio.core.edit.DocOps
 import io.github.rdilipkumar.subtitlestudio.core.model.Lang
 import io.github.rdilipkumar.subtitlestudio.core.model.PhoneticMode
@@ -16,10 +17,14 @@ import io.github.rdilipkumar.subtitlestudio.data.ModelCatalog
 import io.github.rdilipkumar.subtitlestudio.data.ModelStore
 import io.github.rdilipkumar.subtitlestudio.data.ProjectStore
 import io.github.rdilipkumar.subtitlestudio.data.SettingsStore
+import io.github.rdilipkumar.subtitlestudio.data.SpeechEngineKind
 import io.github.rdilipkumar.subtitlestudio.media.AudioDecoder
 import io.github.rdilipkumar.subtitlestudio.ml.SpeechTranscriber
+import io.github.rdilipkumar.subtitlestudio.ml.ThedalEngine
 import io.github.rdilipkumar.subtitlestudio.ml.TranslationService
+import io.github.rdilipkumar.subtitlestudio.ml.WhisperEngine
 import io.github.rdilipkumar.subtitlestudio.render.StylePresets
+import io.github.rdilipkumar.subtitlestudio.work.BackgroundWork
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -78,6 +83,7 @@ class AutoSubtitler(
   private val models: ModelStore,
   private val settings: SettingsStore,
   private val translation: TranslationService,
+  private val work: BackgroundWork,
 ) {
   private val _states = MutableStateFlow<Map<String, JobState>>(emptyMap())
   val states: StateFlow<Map<String, JobState>> = _states
@@ -88,6 +94,7 @@ class AutoSubtitler(
   fun start(projectId: String, options: GenerateOptions) {
     if (isRunning(projectId)) return
     report(projectId, JobState.Running(Step.AUDIO, 0f, steps = stepsFor(options)))
+    work.begin("subtitles-$projectId", "Making subtitles")
     jobs[projectId] = scope.launch(Dispatchers.Default) {
       try {
         run(projectId, options)
@@ -100,7 +107,10 @@ class AutoSubtitler(
       } catch (e: TranslationService.MissingPackException) {
         report(projectId, JobState.Failed(e.message ?: "Translation pack missing"))
       } catch (e: Throwable) {
+        Log.e(TAG, "Subtitle job failed", e)
         report(projectId, JobState.Failed("Something went wrong: ${e.message ?: e.javaClass.simpleName}"))
+      } finally {
+        work.end("subtitles-$projectId")
       }
     }
   }
@@ -111,6 +121,10 @@ class AutoSubtitler(
   }
 
   fun clear(projectId: String) = _states.update { it - projectId }
+
+  private companion object {
+    const val TAG = "AutoSubtitler"
+  }
 
   private fun stepsFor(o: GenerateOptions): List<Step> =
     Step.entries.filter { (it != Step.TRANSLATE || o.translateTo != null) && (it != Step.PHONETIC || o.language.isIndic) }
@@ -135,14 +149,12 @@ class AutoSubtitler(
     val dictionary = settings.value.dictionary
     val phonetic = { s: String -> if (o.language.isIndic) Romanizer.romanize(s, o.phoneticMode, dictionary) else s }
     val words = ArrayList<TimedWord>()
-    SpeechTranscriber(
-      assets = context.assets,
-      modelDir = models.dir(pack),
-      encoder = pack.encoderFile,
-      decoder = pack.decoderFile,
-      tokens = pack.tokensFile,
-      language = pack.whisperLanguage,
-    ).use { tr ->
+    val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+    val engine = when (pack.engine) {
+      SpeechEngineKind.WHISPER -> WhisperEngine(models.dir(pack), pack.encoderFile, pack.decoderFile, pack.tokensFile, pack.whisperLanguage, threads)
+      SpeechEngineKind.THEDAL -> ThedalEngine(models.dir(pack), threads)
+    }
+    SpeechTranscriber(context.assets, engine).use { tr ->
       running(Step.SPEECH, 0f)
       val pieces = tr.findPieces(samples)
       running(Step.SPEECH, 1f, "${pieces.size} parts with speech")
@@ -150,6 +162,7 @@ class AutoSubtitler(
       val started = System.currentTimeMillis()
       for ((i, piece) in pieces.withIndex()) {
         val r = tr.transcribe(samples, piece)
+        Log.i(TAG, "Part ${i + 1}/${pieces.size} (${pack.engine}): ${r.text.take(80)}")
         words.addAll(r.words)
         if (r.text.isNotBlank()) {
           heard.add(r.text)
@@ -182,7 +195,10 @@ class AutoSubtitler(
         doc = DocOps.setAutoTranslations(doc, map)
       } else {
         translateTo = null
-        doc = doc.copy(tracks = doc.tracks.copy(showTranslation = false))
+        var tracks = doc.tracks.copy(showTranslation = false)
+        // Translation was the only line: show the words instead of nothing.
+        if (tracks.visibleInOrder().isEmpty()) tracks = if (o.language.isIndic) tracks.copy(showPhonetic = true) else tracks.copy(showNative = true)
+        doc = doc.copy(tracks = tracks)
       }
     }
 
@@ -206,6 +222,7 @@ class AutoSubtitler(
         showPhonetic = o.tracks.showPhonetic,
         showTranslation = o.tracks.showTranslation,
         phoneticMode = o.phoneticMode,
+        mainLine = o.tracks.visibleInOrder().firstOrNull(),
       )
     }
   }

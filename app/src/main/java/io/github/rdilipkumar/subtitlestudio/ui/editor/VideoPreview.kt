@@ -123,6 +123,8 @@ fun VideoPreview(
               var moved = false
               var start = latestTransform
               var cur = start
+              // What was last sent: the screen's copy may not have caught up when the finger lifts.
+              var sent = start
               var totalPan = Offset.Zero
               val startTime = down.uptimeMillis
               while (true) {
@@ -152,12 +154,13 @@ fun VideoPreview(
                   if (guideX) nx = 0.5f
                   if (guideY) ny = 0.5f
                   if (abs(nr) < 3f) nr = 0f
-                  onTransform(cur.copy(x = nx, y = ny, rotation = nr), false)
+                  sent = cur.copy(x = nx, y = ny, rotation = nr)
+                  onTransform(sent, false)
                   event.changes.forEach { if (it.positionChange() != Offset.Zero) it.consume() }
                 }
               }
               if (moved) {
-                onTransform(latestTransform, true)
+                onTransform(sent, true)
               } else {
                 val up = System.currentTimeMillis()
                 if (!onCaption) onSelect(null)

@@ -11,6 +11,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import io.github.rdilipkumar.subtitlestudio.App
 import io.github.rdilipkumar.subtitlestudio.core.edit.DocOps
 import io.github.rdilipkumar.subtitlestudio.core.edit.EditHistory
+import io.github.rdilipkumar.subtitlestudio.core.format.SubtitleFormats
 import io.github.rdilipkumar.subtitlestudio.core.model.CaptionStyle
 import io.github.rdilipkumar.subtitlestudio.core.model.Cue
 import io.github.rdilipkumar.subtitlestudio.core.model.Lang
@@ -19,6 +20,7 @@ import io.github.rdilipkumar.subtitlestudio.core.model.ProjectFile
 import io.github.rdilipkumar.subtitlestudio.core.model.ProjectMeta
 import io.github.rdilipkumar.subtitlestudio.core.model.SafeZone
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
+import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleMode
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackSettings
 import io.github.rdilipkumar.subtitlestudio.core.model.Transform
@@ -313,6 +315,17 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
   fun move(cueId: String, deltaMs: Long, key: String? = null) =
     commit("Moved a caption in time", DocOps.moveCue(_ui.value.doc, cueId, deltaMs, duration), key ?: "move-$cueId")
 
+  /** Moves a caption so it starts at [startMs], measured against the latest doc (not the screen's copy). */
+  fun moveTo(cueId: String, startMs: Long, key: String? = null) {
+    val cue = _ui.value.doc.cue(cueId) ?: return
+    move(cueId, startMs - cue.startMs, key)
+  }
+
+  /** A finger drag finished: the next drag starts a new undo step. */
+  fun endGesture() {
+    history?.seal()
+  }
+
   fun shiftAll(deltaMs: Long) = commit("Shifted all captions", DocOps.shiftAll(_ui.value.doc, deltaMs, duration), key = "shift-all")
 
   fun setWordTiming(cueId: String, wordId: String, start: Long, end: Long) =
@@ -363,6 +376,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setTracks(t: TrackSettings) = commit("Changed lines on screen", _ui.value.doc.copy(tracks = t))
 
+  /** Phonetic (the sounds in English letters) or translation (the meaning), switchable any time. */
+  fun setSubtitleMode(m: SubtitleMode) {
+    val doc = _ui.value.doc
+    commit(if (m == SubtitleMode.PHONETIC) "Mode: phonetic" else "Mode: translation", doc.copy(tracks = doc.tracks.withMode(m)))
+    if (m == SubtitleMode.TRANSLATION && doc.cues.any { it.translationState == TranslationState.NONE || it.translationState == TranslationState.STALE }) {
+      if (canTranslate()) translate(null) else toast("Download the translation pack to see the meaning (Language packs)")
+    }
+  }
+
   fun moveTrack(kind: TrackKind, up: Boolean) {
     val tracks = _ui.value.doc.tracks
     val order = tracks.order.toMutableList()
@@ -397,6 +419,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
     if (cues.isEmpty()) return toast("All translations are up to date")
     _ui.update { it.copy(busy = "Translating…") }
+    g.work.begin("translate-${projectId}", "Translating captions")
     viewModelScope.launch {
       try {
         val map = g.translation.translate(cues, from, to, groupSentences = cueIds == null) { d, t ->
@@ -405,9 +428,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val next = DocOps.setAutoTranslations(_ui.value.doc, map)
         commit(if (cues.size == 1) "Translated a caption" else "Translated ${cues.size} captions", next.copy(tracks = next.tracks.copy(showTranslation = true)))
       } catch (e: Exception) {
+        android.util.Log.e("EditorViewModel", "Translation failed", e)
         toast("Translation failed: ${e.message}")
       } finally {
         _ui.update { it.copy(busy = null) }
+        g.work.end("translate-${projectId}")
       }
     }
   }
@@ -423,21 +448,25 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     val doc = _ui.value.doc
     if (doc.cues.isEmpty()) return toast("Add some captions first")
     player.pause()
+    g.work.begin("export-${meta.id}", "Making your video")
     exportJob = viewModelScope.launch {
       _ui.update { it.copy(export = ExportState.Running("Making your video", 0f)) }
+      val tmp = File(getApplication<Application>().cacheDir, "exports/${meta.id}.mp4")
       try {
-        val tmp = File(getApplication<Application>().cacheDir, "exports/${meta.id}.mp4")
         g.exporter.burnIn(g.projects.videoFile(pf.meta), doc, tmp) { p ->
           _ui.update { it.copy(export = ExportState.Running("Making your video", p)) }
         }
         val name = safeName(meta.name) + "_subtitled_" + System.currentTimeMillis() % 100000 + ".mp4"
         val uri = g.exporter.saveToGallery(tmp, name)
-        tmp.delete()
         _ui.update { it.copy(export = ExportState.Done("Saved to Movies/Subtitle Studio", uri, "video/mp4")) }
       } catch (e: kotlinx.coroutines.CancellationException) {
         _ui.update { it.copy(export = ExportState.Idle) }
       } catch (e: Exception) {
+        android.util.Log.e("EditorViewModel", "Video export failed", e)
         _ui.update { it.copy(export = ExportState.Failed(e.message ?: "Export failed")) }
+      } finally {
+        tmp.delete()
+        g.work.end("export-${meta.id}")
       }
     }
   }
@@ -447,7 +476,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     _ui.update { it.copy(export = ExportState.Idle) }
   }
 
-  fun exportFile(type: VideoExporter.FileType, tracks: List<TrackKind>) {
+  fun exportFile(type: VideoExporter.FileType, tracks: List<TrackKind>, nameEnding: String = "") {
     val meta = _ui.value.meta ?: return
     val doc = _ui.value.doc
     if (doc.cues.isEmpty()) return toast("Add some captions first")
@@ -455,11 +484,33 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
       try {
         val script = if (_ui.value.language.isIndic) _ui.value.language.script else io.github.rdilipkumar.subtitlestudio.core.model.Script.LATIN
         val text = g.exporter.subtitleText(type, doc, tracks, meta.width, meta.height, script)
-        val uri = g.exporter.saveSubtitleFile(text, safeName(meta.name) + "." + type.ext, type.mime)
+        val uri = g.exporter.saveSubtitleFile(text, safeName(meta.name) + nameEnding + "." + type.ext, type.mime)
         _ui.update { it.copy(export = ExportState.Done("Saved to Downloads/Subtitle Studio", uri, type.mime)) }
       } catch (e: Exception) {
         _ui.update { it.copy(export = ExportState.Failed(e.message ?: "Could not save the file")) }
       }
+    }
+  }
+
+  /** One line per caption as a plain .srt, to fix in any app and load back with [loadEdited]. */
+  fun exportForEditing(line: TrackKind) = exportFile(VideoExporter.FileType.SRT, listOf(line), nameEnding = "_edit")
+
+  /** Replaces the captions with an .srt or .vtt the user edited elsewhere. One undo brings the old ones back. */
+  fun loadEdited(uri: Uri) {
+    val app = getApplication<Application>()
+    viewModelScope.launch {
+      val text = withContext(Dispatchers.IO) {
+        runCatching { app.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
+      }
+      val parsed = text?.let { SubtitleFormats.parse(it.removePrefix("\uFEFF")) }.orEmpty()
+      if (parsed.isEmpty()) return@launch toast("No captions found in that file. It should be an .srt or .vtt subtitle file.")
+      val lang = _ui.value.language
+      // Edited in English letters (Tanglish and the like): keep them exactly as typed.
+      val phoneticEdit = lang.isIndic && Romanizer.dominantScript(parsed.joinToString(" ") { it.lines.joinToString(" ") }) == io.github.rdilipkumar.subtitlestudio.core.model.Script.LATIN
+      val next = DocOps.loadEdited(_ui.value.doc, parsed, phonetic(), UuidIds, phoneticEdit)
+      commit("Loaded your edited file (${next.cues.size} captions)", next)
+      select(null)
+      toast("Loaded ${next.cues.size} captions from your file. Undo brings the old ones back.")
     }
   }
 

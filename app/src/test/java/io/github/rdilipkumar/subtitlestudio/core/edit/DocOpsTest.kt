@@ -9,6 +9,7 @@ import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
 import io.github.rdilipkumar.subtitlestudio.core.timing.CueBuilder
 import io.github.rdilipkumar.subtitlestudio.core.timing.IdGen
 import io.github.rdilipkumar.subtitlestudio.core.timing.TimedWord
+import io.github.rdilipkumar.subtitlestudio.core.timing.WordTiming
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -78,6 +79,22 @@ class DocOpsTest {
     assertValid(merged)
   }
 
+  @Test fun split_short_cue_never_runs_into_the_next() {
+    val short = SubtitleDoc(
+      cues = listOf(
+        Cue("a", 1000, 1300, listOf(word("w0", "ஒன்று", 1000, 1150), word("w1", "இரண்டு", 1150, 1300))),
+        Cue("b", 1350, 2000, listOf(word("w2", "மூன்று", 1350, 2000))),
+      ),
+    )
+    // Not enough room for two 200 ms captions before "b": left alone.
+    assertEquals(short, DocOps.splitCue(short, "a", 0, ids))
+    // With free time after it, the halves may grow into it.
+    val roomy = short.copy(cues = listOf(short.cues[0], short.cues[1].copy(startMs = 1600, words = listOf(word("w2", "மூன்று", 1600, 2000)))))
+    val split = DocOps.splitCue(roomy, "a", 0, ids)
+    assertEquals(3, split.cues.size)
+    assertValid(split)
+  }
+
   @Test fun moveCue_stops_at_neighbours() {
     val d = DocOps.moveCue(doc(), "b", -5000, 10_000)
     assertEquals(1000L, d.cue("b")!!.startMs)
@@ -121,6 +138,55 @@ class DocOpsTest {
     assertValid(d)
   }
 
+  @Test fun regroup_keeps_word_ids_even_for_same_word_at_same_time() {
+    val twins = SubtitleDoc(
+      cues = listOf(
+        Cue("a", 0, 1000, listOf(word("x1", "நா", 0, 300), word("x2", "நா", 0, 300), word("x3", "வா", 400, 1000))),
+      ),
+    )
+    val d = DocOps.regroup(twins, CaptionLength.ONE_WORD, ids)
+    assertEquals(listOf("x1", "x2", "x3"), d.cues.flatMap { c -> c.words.map { it.id } })
+  }
+
+  @Test fun loadEdited_replaces_words_and_keeps_look() {
+    val styled = doc().copy(cues = doc().cues.map { if (it.id == "b") it.copy(transform = io.github.rdilipkumar.subtitlestudio.core.model.Transform(y = 0.3f)) else it })
+    val srt = """
+1
+00:00:00,000 --> 00:00:01,000
+வணக்கம் நண்பர்களே
+
+2
+00:00:02,000 --> 00:00:03,000
+எப்படி இருக்கீங்க எல்லாரும்
+"""
+    val d = DocOps.loadEdited(styled, io.github.rdilipkumar.subtitlestudio.core.format.SubtitleFormats.parse(srt), ph, ids, phoneticEdit = false)
+    assertEquals(2, d.cues.size)
+    assertEquals("vanakkam nanbargale", d.cues[0].phonetic)
+    assertEquals(TranslationState.AUTO, d.cues[0].translationState) // same words: translation still good
+    assertFalse(d.cues[0].edited)
+    assertEquals("எப்படி இருக்கீங்க எல்லாரும்", d.cues[1].text)
+    assertTrue(d.cues[1].edited)
+    assertEquals(0.3f, d.cues[1].transform!!.y) // its own position kept
+    assertValid(d)
+  }
+
+  @Test fun loadEdited_english_letters_stay_as_typed_and_overlaps_are_fixed() {
+    val srt = """
+1
+00:00:00,000 --> 00:00:01,500
+Hi makkale vibe pannalaamaa
+
+2
+00:00:01,200 --> 00:00:01,250
+super
+"""
+    val d = DocOps.loadEdited(doc(), io.github.rdilipkumar.subtitlestudio.core.format.SubtitleFormats.parse(srt), ph, ids, phoneticEdit = true)
+    assertEquals("Hi makkale vibe pannalaamaa", d.cues[0].phonetic)
+    assertEquals(1500L, d.cues[1].startMs) // pushed after the first one
+    assertEquals(TranslationState.STALE, d.cues[0].translationState)
+    assertValid(d)
+  }
+
   @Test fun replaceAll_counts() {
     val (d, count) = DocOps.replaceAll(doc(), "வணக்கம்", "ஹாய்", ph)
     assertEquals(1, count)
@@ -157,5 +223,21 @@ class DocOpsTest {
     h.push("Delete", DocOps.deleteCue(doc(), "a"), now = 9000) // drops the redo branch
     assertEquals(2, h.all.size)
     assertEquals("Delete", h.all.last().label)
+  }
+
+  @Test fun history_seal_starts_a_new_entry() {
+    val h = EditHistory(doc())
+    val d1 = DocOps.moveCue(doc(), "b", 100, 10_000)
+    h.push("Move", d1, key = "drag-b", now = 1000)
+    h.seal() // finger lifted
+    h.push("Move", DocOps.moveCue(d1, "b", 100, 10_000), key = "drag-b", now = 1500)
+    assertEquals(3, h.all.size)
+    assertEquals(d1, h.undo())
+  }
+
+  @Test fun token_word_times_never_overlap() {
+    val words = WordTiming.wordsFromTokens("அ ஆ இ", listOf("அ", " ஆ", " இ"), listOf(100L, 100L, 120L), 500)!!
+    for (i in 0 until words.lastIndex) assertTrue(words[i].third <= words[i + 1].second)
+    for (w in words) assertTrue(w.third - w.second >= 40)
   }
 }

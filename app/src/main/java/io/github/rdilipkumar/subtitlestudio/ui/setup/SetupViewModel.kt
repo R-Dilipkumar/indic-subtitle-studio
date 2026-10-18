@@ -14,6 +14,7 @@ import io.github.rdilipkumar.subtitlestudio.core.model.PhoneticMode
 import io.github.rdilipkumar.subtitlestudio.core.model.ProjectMeta
 import io.github.rdilipkumar.subtitlestudio.core.model.ProjectStatus
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
+import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackSettings
 import io.github.rdilipkumar.subtitlestudio.core.model.TranslationState
 import io.github.rdilipkumar.subtitlestudio.core.model.Word
@@ -43,6 +44,8 @@ data class SetupChoices(
   val showPhonetic: Boolean,
   val showTranslation: Boolean,
   val phoneticMode: PhoneticMode,
+  /** The line drawn first and biggest. Always shown. */
+  val main: TrackKind,
 )
 
 class SetupViewModel(app: Application) : AndroidViewModel(app) {
@@ -70,7 +73,12 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
         showPhonetic = s.showPhonetic,
         showTranslation = s.showTranslation,
         phoneticMode = s.phoneticMode,
-      )
+        main = s.mainLine ?: when {
+          s.showTranslation && !s.showPhonetic -> TrackKind.TRANSLATION
+          s.showPhonetic && s.lastLanguage.isIndic -> TrackKind.PHONETIC
+          else -> TrackKind.NATIVE
+        },
+      ).let { normalize(it) }
     },
   )
   val choices: StateFlow<SetupChoices> = _choices
@@ -89,9 +97,25 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
   }
 
   fun change(f: (SetupChoices) -> SetupChoices) = _choices.update { c ->
-    val n = f(c)
+    var n = f(c)
+    // Tanglish captions are the English-letters line; the mixed-script line starts hidden.
+    if (n.language == Lang.TANGLISH && c.language != Lang.TANGLISH) n = n.copy(showNative = false, showPhonetic = true, main = TrackKind.PHONETIC)
+    if (c.language == Lang.TANGLISH && n.language != Lang.TANGLISH) n = n.copy(showNative = true)
+    normalize(n)
+  }
+
+  /** Picks the main line; it is always shown. */
+  fun setMain(kind: TrackKind) = change { it.copy(main = kind).withLine(kind, true) }
+
+  private fun normalize(c: SetupChoices): SetupChoices {
+    var n = c
+    // English has no English-letters line.
+    if (!n.language.isIndic && n.main == TrackKind.PHONETIC) n = n.copy(main = TrackKind.NATIVE)
     // Translating into the spoken language makes no sense; pick a sensible other one.
-    if (n.translateTo == n.language) n.copy(translateTo = if (n.language == Lang.ENGLISH) Lang.TAMIL else Lang.ENGLISH) else n
+    if (n.translateTo == null || n.translateTo == n.language || n.translateTo?.isTranslationTarget == false) {
+      n = n.copy(translateTo = if (n.language == Lang.ENGLISH) Lang.TAMIL else Lang.ENGLISH)
+    }
+    return n.withLine(n.main, true)
   }
 
   fun speechPack(): ModelPack = ModelCatalog.speech.getValue(_choices.value.language)
@@ -107,17 +131,13 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
 
   fun options(): GenerateOptions {
     val c = _choices.value
-    val translate = c.showTranslation && c.translateTo != null
+    val tracks = SetupSamples.tracks(c)
     return GenerateOptions(
       language = c.language,
-      translateTo = if (translate) c.translateTo else null,
+      translateTo = if (tracks.showTranslation) c.translateTo else null,
       length = c.length,
       presetId = c.presetId,
-      tracks = TrackSettings(
-        showNative = c.showNative,
-        showPhonetic = c.showPhonetic && c.language.isIndic,
-        showTranslation = translate,
-      ),
+      tracks = tracks,
       phoneticMode = c.phoneticMode,
     )
   }
@@ -173,40 +193,19 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
     onDone()
   }
 
-  /** A made-up caption in the chosen language, to preview looks. */
-  fun sampleDoc(): Pair<SubtitleDoc, Cue> {
-    val c = _choices.value
-    val preset = StylePresets.byId(c.presetId)
-    val (text, translation) = SAMPLES.getValue(c.language)
-    val shownTranslation = if (c.translateTo == Lang.ENGLISH || c.language == Lang.ENGLISH) translation else SAMPLES[c.translateTo]?.first ?: translation
-    val parts = text.split(' ')
-    val cue = Cue(
-      id = "sample",
-      startMs = 0,
-      endMs = 2000,
-      words = parts.mapIndexed { i, w ->
-        Word("s$i", w, if (c.language.isIndic) Romanizer.romanize(w, c.phoneticMode) else w, i * 500L, i * 500L + 480)
-      },
-      translation = if (c.language == Lang.ENGLISH) SAMPLES[c.translateTo ?: Lang.TAMIL]!!.first else shownTranslation,
-    )
-    val doc = SubtitleDoc(
-      cues = listOf(cue),
-      style = preset.style,
-      transform = preset.transform,
-      tracks = TrackSettings(c.showNative, c.showPhonetic && c.language.isIndic, c.showTranslation && c.translateTo != null),
-      phoneticMode = c.phoneticMode,
-    )
-    return doc to cue
-  }
+  /** The sample sentence as captions, for the live preview. */
+  fun sample(presetId: String = _choices.value.presetId, length: CaptionLength = _choices.value.length): Pair<SubtitleDoc, Long> =
+    SetupSamples.build(_choices.value, presetId, length)
+}
 
-  companion object {
-    val SAMPLES: Map<Lang, Pair<String, String>> = mapOf(
-      Lang.TAMIL to ("வணக்கம் நண்பர்களே" to "Hello friends"),
-      Lang.TELUGU to ("నమస్కారం స్నేహితులారా" to "Hello friends"),
-      Lang.KANNADA to ("ನಮಸ್ಕಾರ ಸ್ನೇಹಿತರೇ" to "Hello friends"),
-      Lang.MALAYALAM to ("നമസ്കാരം സുഹൃത്തുക്കളേ" to "Hello friends"),
-      Lang.HINDI to ("नमस्ते दोस्तों" to "Hello friends"),
-      Lang.ENGLISH to ("Hello friends" to "Hello friends"),
-    )
-  }
+fun SetupChoices.isShown(kind: TrackKind): Boolean = when (kind) {
+  TrackKind.NATIVE -> showNative
+  TrackKind.PHONETIC -> showPhonetic && language.isIndic
+  TrackKind.TRANSLATION -> showTranslation
+}
+
+fun SetupChoices.withLine(kind: TrackKind, on: Boolean): SetupChoices = when (kind) {
+  TrackKind.NATIVE -> copy(showNative = on)
+  TrackKind.PHONETIC -> copy(showPhonetic = on)
+  TrackKind.TRANSLATION -> copy(showTranslation = on)
 }

@@ -10,7 +10,9 @@ import java.io.File
  * matching design for Tamil, Telugu, Kannada and Malayalam (plus English letters), so the
  * native line and the English-letters line look like one style.
  *
- * All bundled fonts are from Google Fonts (SIL Open Font License, see assets/fonts/OFL.txt).
+ * All bundled fonts are from Google Fonts (SIL Open Font License or Apache 2.0, see
+ * assets/fonts/NOTICE.txt). The display fonts (Anton and after) have English letters only;
+ * Indian-script text in them falls back to the phone's font.
  */
 class FontRegistry(private val context: Context) {
 
@@ -51,6 +53,12 @@ class FontRegistry(private val context: Context) {
     FontChoice("poppins", "Poppins", latin = "fonts/poppins-extrabold.ttf"),
     FontChoice("montserrat", "Montserrat", latin = "fonts/montserrat.ttf"),
     FontChoice("bebas", "Bebas", latin = "fonts/bebas-neue.ttf", weight = 400),
+    FontChoice("anton", "Anton", latin = "fonts/anton.ttf", weight = 400),
+    FontChoice("bangers", "Bangers", latin = "fonts/bangers.ttf", weight = 400),
+    FontChoice("luckiest", "Luckiest Guy", latin = "fonts/luckiest-guy.ttf", weight = 400),
+    FontChoice("lilita", "Lilita One", latin = "fonts/lilita-one.ttf", weight = 400),
+    FontChoice("archivo", "Archivo Black", latin = "fonts/archivo-black.ttf", weight = 400),
+    FontChoice("marker", "Marker", latin = "fonts/permanent-marker.ttf", weight = 400),
   )
 
   @Volatile
@@ -82,6 +90,12 @@ class FontRegistry(private val context: Context) {
     "poppins" -> "Poppins"
     "montserrat" -> "Montserrat"
     "bebas" -> "Bebas Neue"
+    "anton" -> "Anton"
+    "bangers" -> "Bangers"
+    "luckiest" -> "Luckiest Guy"
+    "lilita" -> "Lilita One"
+    "archivo" -> "Archivo Black"
+    "marker" -> "Permanent Marker"
     else -> when (script) {
       Script.TAMIL -> "Noto Sans Tamil"
       Script.TELUGU -> "Noto Sans Telugu"

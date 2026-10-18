@@ -59,7 +59,9 @@ fun Timeline(
   onSeek: (Long, done: Boolean) -> Unit,
   onSelect: (String?) -> Unit,
   onRetime: (String, Long, Long) -> Unit,
-  onMove: (String, Long) -> Unit,
+  /** Move the caption so it starts at this time. */
+  onMoveTo: (String, Long) -> Unit,
+  onDragEnd: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val density = LocalDensity.current
@@ -127,7 +129,7 @@ fun Timeline(
             when (mode) {
               1 -> onRetime(sel!!.id, sel.startMs + dMs, sel.endMs)
               2 -> onRetime(sel!!.id, sel.startMs, sel.endMs + dMs)
-              3 -> onMove(sel!!.id, sel.startMs + dMs - (latestCues.firstOrNull { it.id == sel.id }?.startMs ?: sel.startMs))
+              3 -> onMoveTo(sel!!.id, sel.startMs + dMs)
               else -> onSeek((posAtDown - dMs).coerceIn(0, durationMs), false)
             }
           }
@@ -137,6 +139,8 @@ fun Timeline(
             if (hit != null && hit.id != sel?.id) onSeek(hit.startMs, true)
           } else if (mode == 0 && moved) {
             onSeek(latestPos, true)
+          } else if (moved) {
+            onDragEnd()
           }
         }
       },
