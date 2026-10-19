@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.FindReplace
 import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.AlertDialog
@@ -52,6 +53,7 @@ import io.github.rdilipkumar.subtitlestudio.ui.editor.EditorViewModel
 import io.github.rdilipkumar.subtitlestudio.ui.editor.Tool
 import io.github.rdilipkumar.subtitlestudio.ui.editor.cueMarkColor
 import io.github.rdilipkumar.subtitlestudio.ui.editor.rememberEditedFilePicker
+import io.github.rdilipkumar.subtitlestudio.ui.editor.rememberSrtImporter
 import io.github.rdilipkumar.subtitlestudio.ui.theme.Studio
 
 /** Every caption as a list (like a script). The one playing now is highlighted. */
@@ -64,6 +66,8 @@ fun CaptionsPanel(ui: EditorUi, vm: EditorViewModel, positionMs: Long, onSeek: (
   var replacing by remember { mutableStateOf(false) }
   var confirmRedo by remember { mutableStateOf(false) }
   val loadEdited = rememberEditedFilePicker(vm)
+  val importSrt = rememberSrtImporter(vm)
+  var confirmImport by remember { mutableStateOf(false) }
   LaunchedEffect(playingIndex) {
     if (playingIndex >= 0 && listState.layoutInfo.visibleItemsInfo.none { it.index == playingIndex + 1 }) listState.animateScrollToItem(playingIndex)
   }
@@ -84,6 +88,7 @@ fun CaptionsPanel(ui: EditorUi, vm: EditorViewModel, positionMs: Long, onSeek: (
       Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         SmallAction("Add here", Icons.Rounded.Add) { adding = true }
         SmallAction("Find & replace", Icons.Rounded.FindReplace) { replacing = true }
+        SmallAction("Import .srt", Icons.Rounded.FileUpload) { if (cues.isEmpty()) importSrt() else confirmImport = true }
         if (cues.isNotEmpty()) SmallAction("Load edited file", Icons.Rounded.UploadFile, loadEdited)
         SmallAction(if (cues.isEmpty()) "Auto subtitles" else "Redo with AI", Icons.Rounded.AutoAwesome) {
           if (cues.isEmpty()) onRedo() else confirmRedo = true
@@ -95,7 +100,7 @@ fun CaptionsPanel(ui: EditorUi, vm: EditorViewModel, positionMs: Long, onSeek: (
     if (cues.isEmpty()) {
       item {
         Text(
-          "No captions yet. Move the playhead and tap \"Add here\", or go back and let the app make them.",
+          "No captions yet. Move the playhead and tap \"Add here\", tap \"Import .srt\" to bring in a subtitle file, or let the app make them (\"Auto subtitles\").",
           color = Studio.muted,
           fontSize = 13.sp,
           modifier = Modifier.padding(top = 8.dp),
@@ -136,6 +141,15 @@ fun CaptionsPanel(ui: EditorUi, vm: EditorViewModel, positionMs: Long, onSeek: (
     }
   }
 
+  if (confirmImport) {
+    AlertDialog(
+      onDismissRequest = { confirmImport = false },
+      title = { Text("Import an .srt file?") },
+      text = { Text("Its captions replace the ones here. The project's look stays. Undo brings your captions back.") },
+      confirmButton = { TextButton(onClick = { confirmImport = false; importSrt() }) { Text("Choose file") } },
+      dismissButton = { TextButton(onClick = { confirmImport = false }) { Text("Cancel") } },
+    )
+  }
   if (confirmRedo) {
     AlertDialog(
       onDismissRequest = { confirmRedo = false },

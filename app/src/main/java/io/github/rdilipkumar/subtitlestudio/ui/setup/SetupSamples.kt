@@ -1,17 +1,20 @@
 package io.github.rdilipkumar.subtitlestudio.ui.setup
 
+import io.github.rdilipkumar.subtitlestudio.core.model.CaptionStyle
 import io.github.rdilipkumar.subtitlestudio.core.model.Cue
 import io.github.rdilipkumar.subtitlestudio.core.model.Lang
 import io.github.rdilipkumar.subtitlestudio.core.model.PhoneticMode
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackSettings
+import io.github.rdilipkumar.subtitlestudio.core.model.Transform
 import io.github.rdilipkumar.subtitlestudio.core.phonetic.Romanizer
 import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
 import io.github.rdilipkumar.subtitlestudio.core.timing.CueBuilder
 import io.github.rdilipkumar.subtitlestudio.core.timing.IdGen
 import io.github.rdilipkumar.subtitlestudio.core.timing.TimedWord
-import io.github.rdilipkumar.subtitlestudio.render.StylePresets
+import io.github.rdilipkumar.subtitlestudio.core.timing.TranslationSplit
+import io.github.rdilipkumar.subtitlestudio.core.timing.TranslationTrack
 
 /** A made-up sentence in each language, cut into captions exactly as the real run would. */
 object SetupSamples {
@@ -40,32 +43,49 @@ object SetupSamples {
     else -> SENTENCES.getValue(to).first
   }
 
-  /** The visible lines, with [main] on top. */
+  /** The visible lines, with [main] on top, and the translation's own size. */
   fun tracks(c: SetupChoices): TrackSettings {
     val t = TrackSettings(
       showNative = c.showNative,
       showPhonetic = c.showPhonetic && c.language.isIndic,
       showTranslation = c.showTranslation && c.translateTo != null,
+      translationSize = c.translationLength,
     )
     return t.copy(order = listOf(c.main) + t.order.filter { it != c.main })
   }
 
-  /** The sample sentence as captions of [length] in look [presetId], plus how long it plays. */
-  fun build(c: SetupChoices, presetId: String = c.presetId, length: CaptionLength = c.length): Pair<SubtitleDoc, Long> {
+  /** The sample sentence as captions of [length] in [style], plus how long it plays. */
+  fun build(
+    c: SetupChoices,
+    style: CaptionStyle = c.style,
+    transform: Transform = c.transform,
+    length: CaptionLength = c.length,
+  ): Pair<SubtitleDoc, Long> {
+    val cues = captions(c, length)
+    val doc = SubtitleDoc(cues = cues, style = style, transform = transform, tracks = tracks(c), phoneticMode = c.phoneticMode)
+    return doc to ((cues.lastOrNull()?.endMs ?: 0L) + 700)
+  }
+
+  /** The sample cut into captions of [length], each with its share of the translation. */
+  private fun captions(c: SetupChoices, length: CaptionLength): List<Cue> {
     var n = 0
     val ids = IdGen { "s${n++}" }
     val timed = words(c.language).mapIndexed { i, w -> TimedWord(w, 300 + i * WORD_MS, 300 + i * WORD_MS + WORD_MS - 40) }
-    val translation = translation(c.language, c.translateTo)
     val cues = CueBuilder.build(timed, length, { phonetic(c.language, it, c.phoneticMode) }, ids)
-      .map { it.copy(translation = translation) }
-    val preset = StylePresets.byId(presetId)
-    val doc = SubtitleDoc(cues = cues, style = preset.style, transform = preset.transform, tracks = tracks(c), phoneticMode = c.phoneticMode)
-    return doc to ((cues.lastOrNull()?.endMs ?: 0L) + 700)
+    val pieces = TranslationSplit.share(translation(c.language, c.translateTo), cues)
+    return cues.zip(pieces) { cue, p -> cue.copy(translation = p) }
+  }
+
+  /** The first translation piece shown with translation size [size] (null: with each caption). */
+  fun firstTranslationText(c: SetupChoices, size: CaptionLength?): String {
+    val cues = captions(c, c.length)
+    if (size == null) return cues.firstOrNull()?.translation.orEmpty()
+    return TranslationTrack.build(cues, size).firstOrNull()?.text.orEmpty()
   }
 
   /** The first caption's words as the user will read them (English letters when shown). */
   fun firstCaptionText(c: SetupChoices, length: CaptionLength): String {
-    val cue: Cue = build(c, length = length).first.cues.firstOrNull() ?: return ""
+    val cue: Cue = captions(c, length).firstOrNull() ?: return ""
     return if (c.language.isIndic && (c.main == TrackKind.PHONETIC || (c.showPhonetic && c.main != TrackKind.NATIVE))) cue.phonetic else cue.text
   }
 }

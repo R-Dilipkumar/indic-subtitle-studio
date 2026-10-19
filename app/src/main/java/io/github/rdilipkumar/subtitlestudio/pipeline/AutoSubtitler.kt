@@ -3,11 +3,13 @@ package io.github.rdilipkumar.subtitlestudio.pipeline
 import android.content.Context
 import android.util.Log
 import io.github.rdilipkumar.subtitlestudio.core.edit.DocOps
+import io.github.rdilipkumar.subtitlestudio.core.model.CaptionStyle
 import io.github.rdilipkumar.subtitlestudio.core.model.Lang
 import io.github.rdilipkumar.subtitlestudio.core.model.PhoneticMode
 import io.github.rdilipkumar.subtitlestudio.core.model.ProjectStatus
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackSettings
+import io.github.rdilipkumar.subtitlestudio.core.model.Transform
 import io.github.rdilipkumar.subtitlestudio.core.phonetic.Romanizer
 import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
 import io.github.rdilipkumar.subtitlestudio.core.timing.CueBuilder
@@ -23,7 +25,6 @@ import io.github.rdilipkumar.subtitlestudio.ml.SpeechTranscriber
 import io.github.rdilipkumar.subtitlestudio.ml.ThedalEngine
 import io.github.rdilipkumar.subtitlestudio.ml.TranslationService
 import io.github.rdilipkumar.subtitlestudio.ml.WhisperEngine
-import io.github.rdilipkumar.subtitlestudio.render.StylePresets
 import io.github.rdilipkumar.subtitlestudio.work.BackgroundWork
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,7 +42,9 @@ data class GenerateOptions(
   val language: Lang,
   val translateTo: Lang?,
   val length: CaptionLength,
-  val presetId: String,
+  val style: CaptionStyle,
+  val transform: Transform,
+  /** Lines on screen, including the translation's own size. */
   val tracks: TrackSettings,
   val phoneticMode: PhoneticMode,
 )
@@ -176,11 +179,10 @@ class AutoSubtitler(
 
     // 4. Captions with English letters
     if (o.language.isIndic) running(Step.PHONETIC, 0.5f)
-    val preset = StylePresets.byId(o.presetId)
     var doc = SubtitleDoc(
       cues = CueBuilder.build(words, o.length, phonetic, UuidIds),
-      style = preset.style,
-      transform = preset.transform,
+      style = o.style,
+      transform = o.transform,
       tracks = o.tracks,
       phoneticMode = o.phoneticMode,
     )
@@ -217,7 +219,10 @@ class AutoSubtitler(
         lastLanguage = o.language,
         lastTranslateTo = o.translateTo,
         lastLength = o.length,
-        lastPreset = o.presetId,
+        lastTranslationLength = o.tracks.translationSize,
+        lastPreset = o.style.presetId,
+        lastStyle = o.style,
+        lastTransform = o.transform,
         showNative = o.tracks.showNative,
         showPhonetic = o.tracks.showPhonetic,
         showTranslation = o.tracks.showTranslation,

@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
+import io.github.rdilipkumar.subtitlestudio.ui.common.PillFlow
 import io.github.rdilipkumar.subtitlestudio.ui.common.PillRow
 import io.github.rdilipkumar.subtitlestudio.ui.common.SectionTitle
 import io.github.rdilipkumar.subtitlestudio.ui.common.formatTime
@@ -68,6 +69,11 @@ fun TimingPanel(ui: EditorUi, vm: EditorViewModel, positionMs: Long) {
 
     SectionTitle("Caption size", hint = "Rebuilds all captions with the same words")
     PillRow(CaptionLength.entries, CaptionLength.PUNCHY, { it.label }, { regroupTo = it })
+
+    if (ui.doc.cues.any { it.translation.isNotBlank() }) {
+      SectionTitle("Translation size", hint = "How much of the meaning shows at once, on its own timing")
+      PillFlow(listOf<CaptionLength?>(null) + CaptionLength.entries, ui.doc.tracks.translationSize, { it?.label ?: "With the captions" }, { vm.setTranslationSize(it) })
+    }
     Spacer(Modifier.padding(8.dp))
   }
 
@@ -75,7 +81,7 @@ fun TimingPanel(ui: EditorUi, vm: EditorViewModel, positionMs: Long) {
     AlertDialog(
       onDismissRequest = { regroupTo = null },
       title = { Text("Rebuild as \"${len.label}\"?") },
-      text = { Text("Every word and your word fixes are kept. Per-caption looks and translations are cleared (you can translate again). Undo brings everything back.") },
+      text = { Text("Every word, your word fixes and the translations are kept. Per-caption looks are cleared. Undo brings everything back.") },
       confirmButton = { TextButton(onClick = { vm.regroup(len); regroupTo = null }) { Text("Rebuild") } },
       dismissButton = { TextButton(onClick = { regroupTo = null }) { Text("Cancel") } },
     )

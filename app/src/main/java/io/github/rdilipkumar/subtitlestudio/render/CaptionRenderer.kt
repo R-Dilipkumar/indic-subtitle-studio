@@ -2,6 +2,7 @@ package io.github.rdilipkumar.subtitlestudio.render
 
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import io.github.rdilipkumar.subtitlestudio.core.model.Anim
@@ -14,6 +15,10 @@ import io.github.rdilipkumar.subtitlestudio.core.model.Script
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
 import io.github.rdilipkumar.subtitlestudio.core.phonetic.Romanizer
+import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
+import io.github.rdilipkumar.subtitlestudio.core.timing.TranslationSplit
+import io.github.rdilipkumar.subtitlestudio.core.timing.TranslationTrack
+import io.github.rdilipkumar.subtitlestudio.core.timing.WordTiming
 import java.text.BreakIterator
 import java.util.Locale
 import kotlin.math.PI
@@ -35,6 +40,22 @@ class CaptionRenderer(private val fonts: FontRegistry) {
   companion object {
     /** How long one word takes to come in when words appear one by one. */
     private const val WORD_IN_MS = 200f
+
+    /** Captions this close count as back to back: a line that carries on must not blink. */
+    private const val BACK_TO_BACK_MS = 120L
+
+    /**
+     * The caption to draw at [timeMs]. In the short gap between back-to-back captions the one
+     * before stays, so a translation line that runs on across both does not blink off.
+     */
+    fun cueOnScreen(doc: SubtitleDoc, timeMs: Long): Cue? {
+      doc.cueAt(timeMs)?.let { return it }
+      if (doc.tracks.translationSize == null || !doc.tracks.showTranslation) return null
+      val i = doc.cues.indexOfLast { it.startMs <= timeMs }
+      val c = doc.cues.getOrNull(i) ?: return null
+      val next = doc.cues.getOrNull(i + 1) ?: return null
+      return c.takeIf { timeMs - c.endMs < BACK_TO_BACK_MS && next.startMs - c.endMs <= BACK_TO_BACK_MS }
+    }
   }
 
   /** Where a caption was drawn, in video pixels, for tapping and the selection box. */
@@ -57,7 +78,7 @@ class CaptionRenderer(private val fonts: FontRegistry) {
     }
   }
 
-  private class WordBox(val text: String, val wordIndex: Int, val width: Float) {
+  private class WordBox(val text: String, val wordIndex: Int, val width: Float, val typeface: Typeface) {
     var x = 0f
     var baseline = 0f
   }
@@ -65,13 +86,24 @@ class CaptionRenderer(private val fonts: FontRegistry) {
   private class Line(
     val kind: TrackKind,
     val size: Float,
-    val typeface: Typeface,
     val words: List<WordBox>,
     val rowRects: List<RectF>,
     val ascent: Float,
     val descent: Float,
     val space: Float,
-  )
+    /** When each word (by its index) is spoken. */
+    val starts: LongArray,
+    val ends: LongArray,
+    /** When this line's text came on screen and goes off: the caption's, or its own translation piece's. */
+    val from: Long,
+    val to: Long,
+  ) {
+    val top: Float get() = rowRects.firstOrNull()?.top ?: 0f
+    val bottom: Float get() = rowRects.lastOrNull()?.bottom ?: 0f
+  }
+
+  /** The translated words shown with a caption, with when each is said. */
+  private class Piece(val key: String, val words: List<String>, val starts: LongArray, val ends: LongArray, val from: Long, val to: Long)
 
   private class Layout(val lines: List<Line>, val halfW: Float, val halfH: Float, val baseSize: Float)
 
@@ -83,6 +115,7 @@ class CaptionRenderer(private val fonts: FontRegistry) {
   }
   private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG)
   private val tmpRect = RectF()
+  private val textBounds = Rect()
 
   // Small cache: the same caption is drawn for many frames in a row.
   private val cache = object : LinkedHashMap<Any, Layout>(16, 0.75f, true) {
@@ -94,7 +127,7 @@ class CaptionRenderer(private val fonts: FontRegistry) {
    * (used while editing a caption the playhead is not on). Returns where it was drawn.
    */
   fun draw(canvas: Canvas, w: Int, h: Int, doc: SubtitleDoc, timeMs: Long, pinned: Cue? = null, settled: Boolean = false): Placed? {
-    val cue = pinned ?: doc.cueAt(timeMs) ?: return null
+    val cue = pinned ?: cueOnScreen(doc, timeMs) ?: return null
     val static = pinned != null && !pinned.contains(timeMs)
     return drawCue(canvas, w, h, doc, cue, if (static) -1 else timeMs, settled)
   }
@@ -107,142 +140,252 @@ class CaptionRenderer(private val fonts: FontRegistry) {
   fun drawCue(canvas: Canvas, w: Int, h: Int, doc: SubtitleDoc, cue: Cue, timeMs: Long, settled: Boolean = false): Placed? {
     val style = doc.styleOf(cue)
     val tr = doc.transformOf(cue)
-    val layout = layoutFor(doc, cue, style, w, h) ?: return null
     val static = timeMs < 0
     val t = if (static) cue.startMs + style.animMs else timeMs
-
-    // Entrance and exit motion.
-    val m = Motion()
-    if (!static && !settled) {
-      if (style.animMs > 0) comeIn(m, style.entrance, ((t - cue.startMs).toFloat() / style.animMs).coerceIn(0f, 1f), layout.baseSize, layout.halfW)
-      if (style.exitMs > 0) goOut(m, style.exit, 1f - ((cue.endMs - t).toFloat() / style.exitMs).coerceIn(0f, 1f), layout.baseSize, layout.halfW)
-    }
-    if (m.alpha <= 0.003f || m.clipTo <= m.clipFrom) return placed(cue, tr.x * w, tr.y * h, layout, tr.scale, tr.rotation)
-
+    val piece = translationPiece(doc, cue, if (static) -1 else t)
+    val layout = layoutFor(doc, cue, style, w, h, piece) ?: return null
     val cx = tr.x * w
     val cy = tr.y * h
-    val totalScale = tr.scale * m.scale
-    canvas.save()
-    canvas.translate(cx + m.dx, cy + m.dy)
-    if (tr.rotation != 0f) canvas.rotate(tr.rotation)
-    canvas.scale(totalScale, totalScale)
-    if (m.clipFrom > 0f || m.clipTo < 1f) {
-      // Wipe: only part of the caption block (with room for outline and pop) is uncovered.
-      val edge = layout.halfW + layout.baseSize
-      canvas.clipRect(-edge + 2 * edge * m.clipFrom, -layout.halfH * 2f - layout.baseSize, -edge + 2 * edge * m.clipTo, layout.halfH * 2f + layout.baseSize)
-    }
-    val layered = m.alpha < 0.999f
-    if (layered) {
-      tmpRect.set(-layout.halfW * 1.5f, -layout.halfH * 1.6f, layout.halfW * 1.5f, layout.halfH * 1.6f)
-      canvas.saveLayerAlpha(tmpRect, (m.alpha * 255).toInt())
-    }
 
-    // Boxes behind the text.
-    if (style.box != BoxStyle.NONE) {
-      boxPaint.color = style.boxColor
-      val padX = layout.baseSize * 0.35f
-      val padY = layout.baseSize * 0.16f
-      val radius = layout.baseSize * style.boxRadius
+    // Each line comes in and goes out with its own text. A translation piece that runs on from
+    // the caption before (or into the next one) stays still while the other lines change.
+    val spans = layout.lines.map { lineSpan(doc, cue, it) }
+    val motions = spans.map { span -> Motion().also { m -> if (!static && !settled) move(m, style, t, span, layout) } }
+    val uniform = spans.all { it == spans[0] }
+
+    // Everything below is undone at the end in one go, so nothing leaks into what the caller
+    // draws next (a leftover move would shift the rest of the screen).
+    val base = canvas.save()
+    if (uniform) {
+      // One motion for the whole block (the usual case).
+      val m = motions[0]
+      if (m.alpha <= 0.003f || m.clipTo <= m.clipFrom) {
+        canvas.restoreToCount(base)
+        return placed(cue, cx, cy, layout, tr.scale, tr.rotation)
+      }
+      canvas.translate(cx + m.dx, cy + m.dy)
+      if (tr.rotation != 0f) canvas.rotate(tr.rotation)
+      canvas.scale(tr.scale * m.scale, tr.scale * m.scale)
+      if (m.clipFrom > 0f || m.clipTo < 1f) {
+        // Wipe: only part of the caption block (with room for outline and pop) is uncovered.
+        val edge = layout.halfW + layout.baseSize
+        canvas.clipRect(-edge + 2 * edge * m.clipFrom, -layout.halfH * 2f - layout.baseSize, -edge + 2 * edge * m.clipTo, layout.halfH * 2f + layout.baseSize)
+      }
+      if (m.alpha < 0.999f) {
+        tmpRect.set(-layout.halfW * 1.5f, -layout.halfH * 1.6f, layout.halfW * 1.5f, layout.halfH * 1.6f)
+        canvas.saveLayerAlpha(tmpRect, (m.alpha * 255).toInt())
+      }
+      if (style.box == BoxStyle.BLOCK) drawBlockBox(canvas, style, layout, 255)
+      for (line in layout.lines) {
+        if (style.box == BoxStyle.LINES) drawLineBoxes(canvas, style, layout, line)
+        drawLine(canvas, line, style, t, static, settled)
+      }
+    } else {
+      canvas.translate(cx, cy)
+      if (tr.rotation != 0f) canvas.rotate(tr.rotation)
+      canvas.scale(tr.scale, tr.scale)
+      // The one box stays as visible as the most visible line.
       if (style.box == BoxStyle.BLOCK) {
-        tmpRect.set(-layout.halfW - padX, -layout.halfH - padY, layout.halfW + padX, layout.halfH + padY)
-        canvas.drawRoundRect(tmpRect, radius, radius, boxPaint)
-      } else {
-        for (line in layout.lines) for (r in line.rowRects) {
-          tmpRect.set(r.left - padX, r.top - padY * 0.5f, r.right + padX, r.bottom + padY * 0.5f)
-          canvas.drawRoundRect(tmpRect, radius, radius, boxPaint)
+        val a = motions.maxOf { if (it.clipTo > it.clipFrom) it.alpha else 0f }
+        if (a > 0.003f) drawBlockBox(canvas, style, layout, (a * 255).toInt())
+      }
+      for ((i, line) in layout.lines.withIndex()) {
+        val m = motions[i]
+        if (m.alpha <= 0.003f || m.clipTo <= m.clipFrom) continue
+        val count = canvas.save()
+        canvas.translate(m.dx, m.dy)
+        if (m.scale != 1f) canvas.scale(m.scale, m.scale, 0f, (line.top + line.bottom) / 2)
+        if (m.clipFrom > 0f || m.clipTo < 1f) {
+          val edge = layout.halfW + layout.baseSize
+          canvas.clipRect(-edge + 2 * edge * m.clipFrom, line.top - layout.baseSize, -edge + 2 * edge * m.clipTo, line.bottom + layout.baseSize)
         }
+        if (m.alpha < 0.999f) {
+          tmpRect.set(-layout.halfW * 1.5f, line.top - layout.baseSize, layout.halfW * 1.5f, line.bottom + layout.baseSize)
+          canvas.saveLayerAlpha(tmpRect, (m.alpha * 255).toInt())
+        }
+        if (style.box == BoxStyle.LINES) drawLineBoxes(canvas, style, layout, line)
+        drawLine(canvas, line, style, t, static, settled)
+        canvas.restoreToCount(count)
       }
     }
+    canvas.restoreToCount(base)
+    return placed(cue, cx, cy, layout, tr.scale, tr.rotation)
+  }
 
+  private fun drawBlockBox(canvas: Canvas, style: CaptionStyle, layout: Layout, alpha: Int) {
+    boxPaint.color = style.boxColor
+    boxPaint.alpha = boxPaint.alpha * alpha / 255
+    val padX = layout.baseSize * 0.35f
+    val padY = layout.baseSize * 0.16f
+    val radius = layout.baseSize * style.boxRadius
+    tmpRect.set(-layout.halfW - padX, -layout.halfH - padY, layout.halfW + padX, layout.halfH + padY)
+    canvas.drawRoundRect(tmpRect, radius, radius, boxPaint)
+  }
+
+  private fun drawLineBoxes(canvas: Canvas, style: CaptionStyle, layout: Layout, line: Line) {
+    boxPaint.color = style.boxColor
+    val padX = layout.baseSize * 0.35f
+    val padY = layout.baseSize * 0.16f
+    val radius = layout.baseSize * style.boxRadius
+    for (r in line.rowRects) {
+      tmpRect.set(r.left - padX, r.top - padY * 0.5f, r.right + padX, r.bottom + padY * 0.5f)
+      canvas.drawRoundRect(tmpRect, radius, radius, boxPaint)
+    }
+  }
+
+  /** One line's words, with the spoken word standing out and words appearing as they are said. */
+  private fun drawLine(canvas: Canvas, line: Line, style: CaptionStyle, t: Long, static: Boolean, settled: Boolean) {
     // Which word is being spoken.
     var active = -1
     if (!static) {
-      for (i in cue.words.indices) if (cue.words[i].startMs <= t) active = i
+      for (i in line.starts.indices) if (line.starts[i] <= t) active = i
     }
-
     val byLetter = style.reveal == RevealMode.LETTER_BY_LETTER && !static
     val oneByOne = (style.reveal == RevealMode.WORD_BY_WORD || byLetter) && !static
-    for (line in layout.lines) {
-      val base = when (line.kind) {
-        TrackKind.NATIVE -> style.textColor
-        TrackKind.PHONETIC -> style.phoneticColor
-        TrackKind.TRANSLATION -> style.translationColor
+    val base = when (line.kind) {
+      TrackKind.NATIVE -> style.textColor
+      TrackKind.PHONETIC -> style.phoneticColor
+      TrackKind.TRANSLATION -> style.translationColor
+    }
+    fill.textSize = line.size
+    stroke.textSize = line.size
+    stroke.strokeWidth = style.strokeWidth * line.size
+    stroke.color = style.strokeColor
+    for (wb in line.words) {
+      val wi = wb.wordIndex
+      if (oneByOne && wi > active) continue
+      val isActive = wi == active && !static
+      val wordStart = line.starts.getOrElse(wi) { line.from }
+      val wordEnd = line.ends.getOrElse(wi) { line.to }
+      fill.typeface = wb.typeface
+      stroke.typeface = wb.typeface
+      // Typing: the spoken word shows only the letters said so far.
+      val shown = if (byLetter && isActive) typedPart(wb.text, t, wordStart, wordEnd) else null
+      if (shown != null && shown.isEmpty()) continue
+      val drawn = if (shown != null) WordBox(shown, wi, wb.width, wb.typeface).also { it.x = wb.x; it.baseline = wb.baseline } else wb
+      // Each word's own entrance, when words appear one by one.
+      val wp = if (style.reveal == RevealMode.WORD_BY_WORD && !static && !settled && style.wordAnim != Anim.NONE) {
+        ((t - wordStart).toFloat() / WORD_IN_MS).coerceIn(0f, 1f)
+      } else {
+        1f
       }
-      val wordAligned = line.kind != TrackKind.TRANSLATION
-      fill.typeface = line.typeface
-      fill.textSize = line.size
-      stroke.typeface = line.typeface
-      stroke.textSize = line.size
-      stroke.strokeWidth = style.strokeWidth * line.size
-      stroke.color = style.strokeColor
-      for (wb in line.words) {
-        val wi = wb.wordIndex
-        if (wordAligned && oneByOne && wi > active) continue
-        val isActive = wordAligned && wi == active && !static
-        val word = if (wi >= 0) cue.words.getOrNull(wi) else null
-        // Typing: the spoken word shows only the letters said so far.
-        val shown = if (byLetter && isActive && word != null) typedPart(wb.text, t, word.startMs, word.endMs) else null
-        if (shown != null && shown.isEmpty()) continue
-        val drawn = if (shown != null) WordBox(shown, wi, wb.width).also { it.x = wb.x; it.baseline = wb.baseline } else wb
-        // Each word's own entrance, when words appear one by one.
-        val wordStart = word?.startMs ?: cue.startMs
-        val wp = if (wordAligned && style.reveal == RevealMode.WORD_BY_WORD && !static && !settled && style.wordAnim != Anim.NONE) {
-          ((t - wordStart).toFloat() / WORD_IN_MS).coerceIn(0f, 1f)
-        } else {
-          1f
-        }
-        val wordSave = if (wp < 1f) beginWordMotion(canvas, style.wordAnim, wp, wb, line) else 0
-        if (wordSave < 0) continue
-        when (style.highlight) {
-          HighlightMode.NONE -> drawWord(canvas, drawn, base, style, line)
-          HighlightMode.COLOR -> drawWord(canvas, drawn, if (isActive) style.highlightColor else base, style, line)
-          HighlightMode.POP -> {
-            if (isActive) {
-              // Grow the spoken word, but never so much that it covers the gap to its neighbours.
-              val pop = minOf(1.14f, 1f + 1.1f * line.space / drawn.width.coerceAtLeast(1f))
-              canvas.save()
-              canvas.scale(pop, pop, drawn.x + drawn.width / 2, drawn.baseline - line.size * 0.35f)
-              drawWord(canvas, drawn, style.highlightColor, style, line)
-              canvas.restore()
-            } else {
-              drawWord(canvas, drawn, base, style, line)
-            }
-          }
-          HighlightMode.BOX -> {
-            if (isActive) {
-              boxPaint.color = style.highlightColor
-              val pad = line.size * 0.14f
-              tmpRect.set(drawn.x - pad, drawn.baseline + line.ascent - pad * 0.3f, drawn.x + drawn.width + pad, drawn.baseline + line.descent + pad * 0.3f)
-              canvas.drawRoundRect(tmpRect, line.size * 0.22f, line.size * 0.22f, boxPaint)
-            }
+      val wordSave = if (wp < 1f) beginWordMotion(canvas, style.wordAnim, wp, wb, line) else 0
+      if (wordSave < 0) continue
+      when (style.highlight) {
+        HighlightMode.NONE -> drawWord(canvas, drawn, base, style, line)
+        HighlightMode.COLOR -> drawWord(canvas, drawn, if (isActive) style.highlightColor else base, style, line)
+        HighlightMode.POP -> {
+          if (isActive) {
+            // Grow the spoken word, but never so much that it covers the gap to its neighbours.
+            val pop = minOf(1.14f, 1f + 1.1f * line.space / drawn.width.coerceAtLeast(1f))
+            canvas.save()
+            canvas.scale(pop, pop, drawn.x + drawn.width / 2, drawn.baseline - line.size * 0.35f)
+            drawWord(canvas, drawn, style.highlightColor, style, line)
+            canvas.restore()
+          } else {
             drawWord(canvas, drawn, base, style, line)
           }
-          HighlightMode.SWEEP -> {
-            if (!wordAligned || word == null || static) {
-              drawWord(canvas, drawn, base, style, line)
-            } else {
-              val p = ((t - word.startMs).toFloat() / max(1L, word.endMs - word.startMs)).coerceIn(0f, 1f)
-              when {
-                p >= 1f -> drawWord(canvas, drawn, style.highlightColor, style, line)
-                p <= 0f -> drawWord(canvas, drawn, base, style, line)
-                else -> {
-                  drawWord(canvas, drawn, base, style, line)
-                  canvas.save()
-                  canvas.clipRect(drawn.x - line.size, drawn.baseline + line.ascent * 1.3f, drawn.x + drawn.width * p, drawn.baseline + line.descent * 1.5f)
-                  drawWord(canvas, drawn, style.highlightColor, style, line, strokeAgain = false)
-                  canvas.restore()
-                }
+        }
+        HighlightMode.BOX -> {
+          if (isActive) {
+            boxPaint.color = style.highlightColor
+            val pad = line.size * 0.14f
+            tmpRect.set(drawn.x - pad, drawn.baseline + line.ascent - pad * 0.3f, drawn.x + drawn.width + pad, drawn.baseline + line.descent + pad * 0.3f)
+            canvas.drawRoundRect(tmpRect, line.size * 0.22f, line.size * 0.22f, boxPaint)
+          }
+          drawWord(canvas, drawn, base, style, line)
+        }
+        HighlightMode.SWEEP -> {
+          if (static || wi !in line.starts.indices) {
+            drawWord(canvas, drawn, base, style, line)
+          } else {
+            val p = ((t - wordStart).toFloat() / max(1L, wordEnd - wordStart)).coerceIn(0f, 1f)
+            when {
+              p >= 1f -> drawWord(canvas, drawn, style.highlightColor, style, line)
+              p <= 0f -> drawWord(canvas, drawn, base, style, line)
+              else -> {
+                drawWord(canvas, drawn, base, style, line)
+                canvas.save()
+                canvas.clipRect(drawn.x - line.size, drawn.baseline + line.ascent * 1.3f, drawn.x + drawn.width * p, drawn.baseline + line.descent * 1.5f)
+                drawWord(canvas, drawn, style.highlightColor, style, line, strokeAgain = false)
+                canvas.restore()
               }
             }
           }
         }
-        if (wordSave > 0) canvas.restoreToCount(wordSave)
       }
+      if (wordSave > 0) canvas.restoreToCount(wordSave)
     }
+  }
 
-    if (layered) canvas.restore()
-    canvas.restore()
-    return placed(cue, cx, cy, layout, tr.scale, tr.rotation)
+  /**
+   * When a line comes in and goes out. Null: it carries on from the caption before (or into the
+   * next one), so it stays still.
+   */
+  private fun lineSpan(doc: SubtitleDoc, cue: Cue, line: Line): Pair<Long?, Long?> {
+    if (line.from >= cue.startMs && line.to <= cue.endMs) return line.from to line.to
+    val i = indexOf(doc, cue)
+    val prev = if (i > 0) doc.cues[i - 1] else null
+    val next = if (i >= 0) doc.cues.getOrNull(i + 1) else null
+    val carriedIn = line.from < cue.startMs && prev != null && cue.startMs - prev.endMs <= BACK_TO_BACK_MS
+    val carriedOut = line.to > cue.endMs && next != null && next.startMs - cue.endMs <= BACK_TO_BACK_MS
+    return (if (carriedIn) null else max(line.from, cue.startMs)) to (if (carriedOut) null else min(line.to, cue.endMs))
+  }
+
+  private fun indexOf(doc: SubtitleDoc, cue: Cue): Int {
+    val k = doc.cues.binarySearch { it.startMs.compareTo(cue.startMs) }
+    return if (k >= 0 && doc.cues[k].id == cue.id) k else doc.indexOf(cue.id)
+  }
+
+  private fun move(m: Motion, style: CaptionStyle, t: Long, span: Pair<Long?, Long?>, layout: Layout) {
+    val (inAt, outAt) = span
+    if (inAt != null && style.animMs > 0) comeIn(m, style.entrance, ((t - inAt).toFloat() / style.animMs).coerceIn(0f, 1f), layout.baseSize, layout.halfW)
+    if (outAt != null && style.exitMs > 0) goOut(m, style.exit, 1f - ((outAt - t).toFloat() / style.exitMs).coerceIn(0f, 1f), layout.baseSize, layout.halfW)
+  }
+
+  // ---------------------------------------------------------------------------------------
+  // Translation pieces
+
+  private var chunkCues: List<Cue>? = null
+  private var chunkSize: CaptionLength? = null
+  private var chunks: List<Cue> = emptyList()
+
+  private val ownPieces = object : LinkedHashMap<String, Piece>(16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Piece>?): Boolean = size > 24
+  }
+
+  /**
+   * The translation shown with [cue] at [t]: with its own size, the piece on screen then;
+   * otherwise (or for a still caption, [t] < 0) the caption's own translation.
+   */
+  private fun translationPiece(doc: SubtitleDoc, cue: Cue, t: Long): Piece? {
+    if (!doc.tracks.showTranslation) return null
+    val size = doc.tracks.translationSize
+    if (size != null && t >= 0) {
+      if (chunkCues !== doc.cues || chunkSize != size) {
+        chunks = TranslationTrack.build(doc.cues, size)
+        chunkCues = doc.cues
+        chunkSize = size
+      }
+      val ch = TranslationTrack.at(chunks, t, cue) ?: return null
+      return Piece(
+        "c${System.identityHashCode(chunks)}:${ch.id}",
+        ch.words.map { it.text },
+        LongArray(ch.words.size) { ch.words[it].startMs },
+        LongArray(ch.words.size) { ch.words[it].endMs },
+        ch.startMs,
+        ch.endMs,
+      )
+    }
+    val words = TranslationSplit.words(cue.translation)
+    if (words.isEmpty()) return null
+    val s = TranslationSplit.speechStart(cue)
+    val e = TranslationSplit.speechEnd(cue)
+    val key = "o$s|$e|${cue.translation}"
+    ownPieces[key]?.let { return it }
+    val times = WordTiming.spreadWords(words, s, e)
+    return Piece(key, words, LongArray(words.size) { times[it].first }, LongArray(words.size) { times[it].second }, cue.startMs, cue.endMs)
+      .also { ownPieces[key] = it }
   }
 
   /** Where the caption is in its coming-in or going-out motion. */
@@ -353,15 +496,19 @@ class CaptionRenderer(private val fonts: FontRegistry) {
   // ---------------------------------------------------------------------------------------
   // Layout
 
-  private fun layoutFor(doc: SubtitleDoc, cue: Cue, style: CaptionStyle, w: Int, h: Int): Layout? {
-    val key = listOf(System.identityHashCode(cue), cue.id, style, doc.tracks, w, h)
+  private fun layoutFor(doc: SubtitleDoc, cue: Cue, style: CaptionStyle, w: Int, h: Int, piece: Piece?): Layout? {
+    val key = listOf(System.identityHashCode(cue), cue.id, style, doc.tracks, w, h, piece?.key)
     cache[key]?.let { return it }
-    val l = buildLayout(doc, cue, style, w, h) ?: return null
+    val l = buildLayout(doc, cue, style, w, h, piece) ?: return null
     cache[key] = l
     return l
   }
 
-  private fun buildLayout(doc: SubtitleDoc, cue: Cue, style: CaptionStyle, w: Int, h: Int): Layout? {
+  /** The script a word's letters are in: any Indian letter wins over English ones ("rush-ஆ"). */
+  private fun wordScript(word: String): Script =
+    Romanizer.dominantScript(word.filter { it.code >= 0x0900 })
+
+  private fun buildLayout(doc: SubtitleDoc, cue: Cue, style: CaptionStyle, w: Int, h: Int, piece: Piece?): Layout? {
     val baseSize = style.textSize * h
     val maxWidth = style.maxWidth * w
     val nativeScript = Romanizer.dominantScript(cue.text)
@@ -370,7 +517,7 @@ class CaptionRenderer(private val fonts: FontRegistry) {
       val text = when (k) {
         TrackKind.NATIVE -> cue.text
         TrackKind.PHONETIC -> cue.phonetic
-        TrackKind.TRANSLATION -> cue.translation
+        TrackKind.TRANSLATION -> piece?.words?.joinToString(" ") ?: ""
       }
       if (text.isBlank()) continue
       // English videos: the English-letters line would repeat the words.
@@ -384,27 +531,52 @@ class CaptionRenderer(private val fonts: FontRegistry) {
     var maxRow = 0f
     for ((i, kind) in kinds.withIndex()) {
       var size = if (i == 0) baseSize else baseSize * style.secondaryScale
-      val script = if (kind == TrackKind.NATIVE) nativeScript else Script.LATIN
-      val tf = fonts.typeface(style.fontId, script, style.bold)
-      fill.typeface = tf
-      fill.textSize = size
+      val lineScript = when (kind) {
+        TrackKind.NATIVE -> nativeScript
+        TrackKind.PHONETIC -> Script.LATIN
+        TrackKind.TRANSLATION -> Romanizer.dominantScript(piece!!.words.joinToString(""))
+      }
+      val tf = fonts.typeface(style.fontId, lineScript, style.bold)
       val tokens: List<Pair<String, Int>> = when (kind) {
         TrackKind.NATIVE -> cue.words.mapIndexed { wi, wd -> latinCase(wd.text, style) to wi }
         TrackKind.PHONETIC -> cue.words.mapIndexed { wi, wd -> latinCase(wd.phonetic, style) to wi }
-        TrackKind.TRANSLATION -> cue.translation.split(Regex("\\s+")).filter { it.isNotEmpty() }.map { latinCase(it, style) to -1 }
+        TrackKind.TRANSLATION -> piece!!.words.mapIndexed { wi, wd -> latinCase(wd, style) to wi }
       }.filter { it.first.isNotEmpty() }
+      // Each word in its own script's font: in a Tanglish line, "Hi" uses the English letters'
+      // font and "மக்களே" the matching Tamil one.
+      val faces = tokens.map { (word, _) ->
+        if (kind == TrackKind.PHONETIC) tf else fonts.typeface(style.fontId, wordScript(word), style.bold)
+      }
+      fill.textSize = size
+      fun widthOf(k: Int): Float {
+        fill.typeface = faces[k]
+        return fill.measureText(tokens[k].first)
+      }
       // A single word wider than the line would run off the video: shrink this line to fit.
-      val widest = tokens.maxOfOrNull { fill.measureText(it.first) } ?: 0f
+      val widest = tokens.indices.maxOfOrNull { widthOf(it) } ?: 0f
       if (widest > maxWidth) {
         size *= maxWidth / widest
         fill.textSize = size
       }
+      val boxes = tokens.mapIndexed { k, (text, wi) -> WordBox(text, wi, widthOf(k), faces[k]) }
+      fill.typeface = tf
       val fm = fill.fontMetrics
+      // A row is never shorter than its letters: some fonts report a too-small (or upside-down)
+      // line height, and Tamil vowel signs reach far above and below.
+      var ascent = fm.ascent
+      var descent = fm.descent
+      for ((k, t) in tokens.withIndex()) {
+        fill.typeface = faces[k]
+        fill.getTextBounds(t.first, 0, t.first.length, textBounds)
+        ascent = min(ascent, textBounds.top / 0.92f)
+        descent = max(descent, textBounds.bottom / 0.92f)
+      }
+      descent = max(descent, size * 0.2f)
+      fill.typeface = tf
       // Some fonts have a very thin space, and the "pop" highlight grows the spoken word, so
       // keep a clear gap between words.
-      val popRoom = if (style.highlight == HighlightMode.POP && kind != TrackKind.TRANSLATION) 0.10f else 0f
+      val popRoom = if (style.highlight == HighlightMode.POP) 0.10f else 0f
       val space = max(fill.measureText(" "), size * (0.28f + popRoom))
-      val boxes = tokens.map { (text, wi) -> WordBox(text, wi, fill.measureText(text)) }
 
       // Wrap into rows, then avoid a lonely last word.
       val rows = ArrayList<MutableList<WordBox>>()
@@ -426,14 +598,14 @@ class CaptionRenderer(private val fonts: FontRegistry) {
         rows.last().add(0, moved)
       }
 
-      val rowH = (fm.descent - fm.ascent) * 0.92f
+      val rowH = (descent - ascent) * 0.92f
       if (i > 0) y += baseSize * style.lineSpacing
       val rects = ArrayList<RectF>(rows.size)
       for (row in rows) {
         val rowW = row.sumOf { it.width.toDouble() }.toFloat() + space * (row.size - 1)
         maxRow = max(maxRow, rowW)
         var x = -rowW / 2
-        val baseline = y - fm.ascent * 0.92f
+        val baseline = y - ascent * 0.92f
         for (b in row) {
           b.x = x
           b.baseline = baseline
@@ -442,7 +614,14 @@ class CaptionRenderer(private val fonts: FontRegistry) {
         rects.add(RectF(-rowW / 2, y, rowW / 2, y + rowH))
         y += rowH
       }
-      lines.add(Line(kind, size, tf, boxes, rects, fm.ascent * 0.92f, fm.descent * 0.92f, space))
+      val timed = if (kind == TrackKind.TRANSLATION) {
+        listOf(piece!!.starts, piece.ends)
+      } else {
+        listOf(LongArray(cue.words.size) { cue.words[it].startMs }, LongArray(cue.words.size) { cue.words[it].endMs })
+      }
+      val from = if (kind == TrackKind.TRANSLATION) piece!!.from else cue.startMs
+      val to = if (kind == TrackKind.TRANSLATION) piece!!.to else cue.endMs
+      lines.add(Line(kind, size, boxes, rects, ascent * 0.92f, descent * 0.92f, space, timed[0], timed[1], from, to))
     }
     // Centre the block vertically on the caption position.
     val half = y / 2

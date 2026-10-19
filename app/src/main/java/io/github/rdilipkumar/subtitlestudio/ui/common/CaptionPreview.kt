@@ -3,6 +3,11 @@ package io.github.rdilipkumar.subtitlestudio.ui.common
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateRotation
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -19,6 +24,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import io.github.rdilipkumar.subtitlestudio.App
 import io.github.rdilipkumar.subtitlestudio.core.model.Cue
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
+import io.github.rdilipkumar.subtitlestudio.core.model.Transform
 import io.github.rdilipkumar.subtitlestudio.render.CaptionRenderer
 
 /**
@@ -44,6 +52,7 @@ fun CaptionPreview(
   timeMs: Long,
   modifier: Modifier = Modifier,
   closeUp: Boolean = false,
+  onPlaced: ((CaptionRenderer.Placed?) -> Unit)? = null,
 ) {
   val renderer = remember { CaptionRenderer(App.graph.fonts) }
   val image = remember(frame) { frame?.asImageBitmap() }
@@ -82,8 +91,9 @@ fun CaptionPreview(
         nc.save()
         nc.translate(0f, dy)
         nc.scale(scale, scale)
-        renderer.drawCue(nc, w, h, doc, cue, timeMs)
+        val p = renderer.drawCue(nc, w, h, doc, cue, timeMs)
         nc.restore()
+        onPlaced?.invoke(p)
       }
     }
   }
@@ -99,12 +109,68 @@ fun PlayingCaptionPreview(
   loopMs: Long,
   modifier: Modifier = Modifier,
   closeUp: Boolean = false,
+  onPlaced: ((CaptionRenderer.Placed?) -> Unit)? = null,
 ) {
   var t by remember { mutableLongStateOf(0L) }
   LaunchedEffect(loopMs) {
     val start = withFrameMillis { it }
     while (true) withFrameMillis { now -> t = (now - start) % loopMs.coerceAtLeast(1) }
   }
-  val cue = doc.cues.firstOrNull { t >= it.startMs && t < it.endMs }
-  CaptionPreview(frame, videoW, videoH, doc, cue, t, modifier, closeUp)
+  val cue = CaptionRenderer.cueOnScreen(doc, t)
+  CaptionPreview(frame, videoW, videoH, doc, cue, t, modifier, closeUp, onPlaced)
+}
+
+/** Where a preview last drew its caption (kept between captions, so it can be grabbed any time). */
+class PlacedHolder {
+  var last: CaptionRenderer.Placed? = null
+    private set
+
+  fun update(p: CaptionRenderer.Placed?) {
+    if (p != null) last = p
+  }
+}
+
+/**
+ * On a whole-frame [CaptionPreview]: drag the caption to move it, pinch to resize, twist to
+ * rotate. A tap on the caption is kept here (it does not reach the preview's own tap).
+ */
+fun Modifier.captionMover(
+  videoW: Int,
+  placed: PlacedHolder,
+  current: () -> Transform,
+  onMove: (Transform) -> Unit,
+  onGuides: (x: Boolean, y: Boolean) -> Unit,
+): Modifier = pointerInput(videoW) {
+  awaitEachGesture {
+    val down = awaitFirstDown(requireUnconsumed = false)
+    val k = size.width / (if (videoW > 0) videoW else 1080).toFloat()
+    val p = placed.last ?: return@awaitEachGesture
+    if (!p.hit(down.position.x / k, down.position.y / k, 24f / k)) return@awaitEachGesture
+    var cur = current()
+    var moved = false
+    var totalPan = Offset.Zero
+    while (true) {
+      val event = awaitPointerEvent()
+      if (event.changes.none { it.pressed }) {
+        event.changes.forEach { it.consume() }
+        break
+      }
+      val pan = event.calculatePan()
+      val zoom = event.calculateZoom()
+      val rot = event.calculateRotation()
+      totalPan += pan
+      if (!moved && (totalPan.getDistance() > viewConfiguration.touchSlop || zoom != 1f || rot != 0f)) {
+        moved = true
+        cur = current()
+      }
+      if (moved) {
+        val step = CaptionDrag.step(cur, pan, zoom, rot, size.width.toFloat(), size.height.toFloat())
+        cur = step.raw
+        onGuides(step.guideX, step.guideY)
+        onMove(step.shown)
+        event.changes.forEach { if (it.positionChange() != Offset.Zero) it.consume() }
+      }
+    }
+    onGuides(false, false)
+  }
 }

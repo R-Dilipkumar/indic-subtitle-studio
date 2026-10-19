@@ -2,6 +2,7 @@ package io.github.rdilipkumar.subtitlestudio.ml
 
 import io.github.rdilipkumar.subtitlestudio.core.model.Cue
 import io.github.rdilipkumar.subtitlestudio.core.model.Lang
+import io.github.rdilipkumar.subtitlestudio.core.timing.TranslationSplit
 import io.github.rdilipkumar.subtitlestudio.data.ModelCatalog
 import io.github.rdilipkumar.subtitlestudio.data.ModelStore
 import kotlinx.coroutines.Dispatchers
@@ -11,9 +12,10 @@ import kotlin.coroutines.coroutineContext
 
 /**
  * Translates captions offline. Short captions ("2–3 words") make poor sentences on their own,
- * so neighbouring captions that belong to one sentence are translated together, and each of
- * them shows the whole sentence's meaning (word order differs between languages, so cutting
- * the translation into pieces gives fragments like "No one" / "can").
+ * so neighbouring captions that belong to one sentence are translated together, and the
+ * sentence's translation is then shared out between them by speaking time
+ * ([TranslationSplit]). The translation line can show more or less than one piece at a time
+ * (its own size, see TranslationTrack).
  */
 class TranslationService(private val models: ModelStore) {
 
@@ -83,6 +85,7 @@ class TranslationService(private val models: ModelStore) {
     return out
   }
 
-  /** Every caption of the sentence carries the sentence's meaning. */
-  private fun share(group: List<Cue>, text: String): Map<String, String> = group.associate { it.id to text }
+  /** Each caption of the sentence carries its share of the meaning. */
+  private fun share(group: List<Cue>, text: String): Map<String, String> =
+    group.map { it.id }.zip(TranslationSplit.share(text, group)).toMap()
 }

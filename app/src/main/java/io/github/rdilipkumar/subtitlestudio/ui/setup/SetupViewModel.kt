@@ -2,31 +2,22 @@ package io.github.rdilipkumar.subtitlestudio.ui.setup
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.rdilipkumar.subtitlestudio.App
-import io.github.rdilipkumar.subtitlestudio.core.format.SubtitleFormats
-import io.github.rdilipkumar.subtitlestudio.core.model.Cue
+import io.github.rdilipkumar.subtitlestudio.core.model.CaptionStyle
 import io.github.rdilipkumar.subtitlestudio.core.model.Lang
-import io.github.rdilipkumar.subtitlestudio.core.model.Origin
 import io.github.rdilipkumar.subtitlestudio.core.model.PhoneticMode
 import io.github.rdilipkumar.subtitlestudio.core.model.ProjectMeta
 import io.github.rdilipkumar.subtitlestudio.core.model.ProjectStatus
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
-import io.github.rdilipkumar.subtitlestudio.core.model.TrackSettings
-import io.github.rdilipkumar.subtitlestudio.core.model.TranslationState
-import io.github.rdilipkumar.subtitlestudio.core.model.Word
-import io.github.rdilipkumar.subtitlestudio.core.phonetic.Romanizer
+import io.github.rdilipkumar.subtitlestudio.core.model.Transform
 import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
-import io.github.rdilipkumar.subtitlestudio.core.timing.CueBuilder
-import io.github.rdilipkumar.subtitlestudio.core.timing.WordTiming
 import io.github.rdilipkumar.subtitlestudio.data.ModelCatalog
 import io.github.rdilipkumar.subtitlestudio.data.ModelPack
 import io.github.rdilipkumar.subtitlestudio.media.VideoImporter
 import io.github.rdilipkumar.subtitlestudio.pipeline.GenerateOptions
-import io.github.rdilipkumar.subtitlestudio.pipeline.UuidIds
 import io.github.rdilipkumar.subtitlestudio.render.StylePresets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,14 +30,22 @@ data class SetupChoices(
   val language: Lang,
   val translateTo: Lang?,
   val length: CaptionLength,
-  val presetId: String,
   val showNative: Boolean,
   val showPhonetic: Boolean,
   val showTranslation: Boolean,
   val phoneticMode: PhoneticMode,
   /** The line drawn first and biggest. Always shown. */
   val main: TrackKind,
-)
+  /** How much of the translation shows at once; null changes it together with the captions. */
+  val translationLength: CaptionLength? = null,
+  /** The look: a ready-made one plus any changes made here. */
+  val style: CaptionStyle = StylePresets.all.first().style,
+  val transform: Transform = StylePresets.all.first().transform,
+  /** The user moved or resized the caption on the preview, so a new ready-made look keeps that place. */
+  val placedByHand: Boolean = false,
+) {
+  val presetId: String get() = style.presetId
+}
 
 class SetupViewModel(app: Application) : AndroidViewModel(app) {
   private val g = App.graph
@@ -64,11 +63,11 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
 
   private val _choices = MutableStateFlow(
     g.settings.value.let { s ->
+      val preset = StylePresets.byId(s.lastPreset)
       SetupChoices(
         language = s.lastLanguage,
         translateTo = s.lastTranslateTo?.takeIf { it != s.lastLanguage } ?: if (s.lastLanguage == Lang.ENGLISH) Lang.TAMIL else Lang.ENGLISH,
         length = s.lastLength,
-        presetId = s.lastPreset,
         showNative = s.showNative,
         showPhonetic = s.showPhonetic,
         showTranslation = s.showTranslation,
@@ -78,6 +77,11 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
           s.showPhonetic && s.lastLanguage.isIndic -> TrackKind.PHONETIC
           else -> TrackKind.NATIVE
         },
+        translationLength = s.lastTranslationLength,
+        // Start from the look used last time, changes and all.
+        style = s.lastStyle ?: preset.style,
+        transform = s.lastTransform ?: preset.transform,
+        placedByHand = s.lastTransform != null && s.lastTransform != preset.transform,
       ).let { normalize(it) }
     },
   )
@@ -106,6 +110,22 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
 
   /** Picks the main line; it is always shown. */
   fun setMain(kind: TrackKind) = change { it.copy(main = kind).withLine(kind, true) }
+
+  /** A ready-made look. A caption the user placed by hand stays where it is. */
+  fun pickPreset(id: String) = change { c ->
+    val p = StylePresets.byId(id)
+    c.copy(style = p.style, transform = if (c.placedByHand) c.transform else p.transform)
+  }
+
+  fun setStyle(style: CaptionStyle) = change { it.copy(style = style) }
+
+  fun setTransform(t: Transform) = change { it.copy(transform = t, placedByHand = true) }
+
+  /** Back to the ready-made look as it comes, place included. */
+  fun resetLook() = change { c ->
+    val p = StylePresets.byId(c.presetId)
+    c.copy(style = p.style, transform = p.transform, placedByHand = false)
+  }
 
   private fun normalize(c: SetupChoices): SetupChoices {
     var n = c
@@ -136,7 +156,8 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
       language = c.language,
       translateTo = if (tracks.showTranslation) c.translateTo else null,
       length = c.length,
-      presetId = c.presetId,
+      style = c.style,
+      transform = c.transform,
       tracks = tracks,
       phoneticMode = c.phoneticMode,
     )
@@ -151,51 +172,19 @@ class SetupViewModel(app: Application) : AndroidViewModel(app) {
   fun startBlank(onDone: () -> Unit) = viewModelScope.launch {
     val pf = g.projects.load(projectId) ?: return@launch
     val o = options()
-    val preset = StylePresets.byId(o.presetId)
-    val doc = SubtitleDoc(style = preset.style, transform = preset.transform, tracks = o.tracks, phoneticMode = o.phoneticMode)
-    g.projects.save(pf.copy(meta = pf.meta.copy(language = o.language, status = ProjectStatus.READY), doc = doc, aiDoc = null))
-    onDone()
-  }
-
-  /**
-   * Brings in an existing SRT/VTT file. The first line of each caption is taken as the words;
-   * English letters (and later translation) are added from there.
-   */
-  fun importSubtitles(uri: Uri, onDone: () -> Unit) = viewModelScope.launch {
-    val pf = g.projects.load(projectId) ?: return@launch
-    val text = withContext(Dispatchers.IO) {
-      getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-    }
-    val parsed = text?.let { SubtitleFormats.parse(it.removePrefix("﻿")) }.orEmpty()
-    if (parsed.isEmpty()) {
-      _message.value = "No captions found in that file. It should be an .srt or .vtt subtitle file."
-      return@launch
-    }
-    val o = options()
-    val dict = g.settings.value.dictionary
-    val phon = { s: String -> if (o.language.isIndic) Romanizer.romanize(s, o.phoneticMode, dict) else s }
-    val cues = parsed.map { p ->
-      val parts = p.lines.first().split(Regex("\\s+")).filter { it.isNotEmpty() }
-      val times = WordTiming.spreadWords(parts, p.startMs, p.endMs)
-      Cue(
-        id = UuidIds.next(),
-        startMs = p.startMs,
-        endMs = p.endMs,
-        words = parts.mapIndexed { i, w -> Word(UuidIds.next(), w, phon(w), times[i].first, times[i].second) },
-        translation = p.lines.getOrNull(1)?.takeIf { o.tracks.showTranslation } ?: "",
-        translationState = if (p.lines.size > 1 && o.tracks.showTranslation) TranslationState.USER else TranslationState.NONE,
-        origin = Origin.IMPORTED,
-      )
-    }
-    val preset = StylePresets.byId(o.presetId)
-    val doc = SubtitleDoc(CueBuilder.settleTimes(cues), preset.style, preset.transform, o.tracks, o.phoneticMode)
-    g.projects.save(pf.copy(meta = pf.meta.copy(language = o.language, status = ProjectStatus.READY), doc = doc, aiDoc = doc))
+    val doc = SubtitleDoc(style = o.style, transform = o.transform, tracks = o.tracks, phoneticMode = o.phoneticMode)
+    g.projects.save(pf.copy(meta = pf.meta.copy(language = o.language, translateTo = o.translateTo, status = ProjectStatus.READY), doc = doc, aiDoc = null))
     onDone()
   }
 
   /** The sample sentence as captions, for the live preview. */
-  fun sample(presetId: String = _choices.value.presetId, length: CaptionLength = _choices.value.length): Pair<SubtitleDoc, Long> =
-    SetupSamples.build(_choices.value, presetId, length)
+  fun sample(): Pair<SubtitleDoc, Long> = SetupSamples.build(_choices.value)
+
+  /** The sample in a ready-made look, for its card. */
+  fun presetSample(presetId: String): Pair<SubtitleDoc, Long> {
+    val p = StylePresets.byId(presetId)
+    return SetupSamples.build(_choices.value, p.style, p.transform)
+  }
 }
 
 fun SetupChoices.isShown(kind: TrackKind): Boolean = when (kind) {

@@ -1,7 +1,5 @@
 package io.github.rdilipkumar.subtitlestudio.ui.setup
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,7 +30,6 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material.icons.rounded.ZoomIn
@@ -55,11 +52,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,6 +69,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.rdilipkumar.subtitlestudio.core.model.Lang
 import io.github.rdilipkumar.subtitlestudio.core.model.PhoneticMode
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
+import io.github.rdilipkumar.subtitlestudio.core.model.Transform
 import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
 import io.github.rdilipkumar.subtitlestudio.data.ModelCatalog
 import io.github.rdilipkumar.subtitlestudio.data.ModelPack
@@ -75,8 +78,18 @@ import io.github.rdilipkumar.subtitlestudio.render.StylePresets
 import io.github.rdilipkumar.subtitlestudio.ui.common.Badge
 import io.github.rdilipkumar.subtitlestudio.ui.common.CaptionPreview
 import io.github.rdilipkumar.subtitlestudio.ui.common.ChoiceCard
+import io.github.rdilipkumar.subtitlestudio.ui.common.ColourControls
+import io.github.rdilipkumar.subtitlestudio.ui.common.FontControls
+import io.github.rdilipkumar.subtitlestudio.ui.common.MotionControls
+import io.github.rdilipkumar.subtitlestudio.ui.common.OutlineControls
 import io.github.rdilipkumar.subtitlestudio.ui.common.PillFlow
+import io.github.rdilipkumar.subtitlestudio.ui.common.PillRow
+import io.github.rdilipkumar.subtitlestudio.ui.common.PlaceControls
+import io.github.rdilipkumar.subtitlestudio.ui.common.PlacedHolder
 import io.github.rdilipkumar.subtitlestudio.ui.common.PlayingCaptionPreview
+import io.github.rdilipkumar.subtitlestudio.ui.common.SizeControls
+import io.github.rdilipkumar.subtitlestudio.ui.common.StyleChange
+import io.github.rdilipkumar.subtitlestudio.ui.common.captionMover
 import io.github.rdilipkumar.subtitlestudio.ui.common.StepCard
 import io.github.rdilipkumar.subtitlestudio.ui.common.StepHeader
 import io.github.rdilipkumar.subtitlestudio.ui.common.SubHeading
@@ -105,11 +118,12 @@ fun SetupScreen(
   val message by vm.message.collectAsState()
   val speech = vm.speechPack()
   val speechState = packs[speech.id] ?: PackState.Missing
-  val pickSubs = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-    if (uri != null) vm.importSubtitles(uri, onSkip)
-  }
   var pickingLanguage by remember { mutableStateOf(false) }
   var wholeFrame by remember { mutableStateOf(false) }
+  var lookTab by rememberSaveable { mutableStateOf(LookTab.FONT) }
+  // Placing the caption needs the whole frame.
+  LaunchedEffect(lookTab) { if (lookTab == LookTab.PLACE) wholeFrame = true }
+  val context = LocalContext.current
   val videoW = meta?.width ?: 1080
   val videoH = meta?.height ?: 1920
 
@@ -122,8 +136,13 @@ fun SetupScreen(
       }
     }
 
-    // Live preview, pinned so every change shows while scrolling through the options.
+    // Live preview, pinned so every change shows while scrolling through the options. On the
+    // whole frame the caption can be dragged, pinched and turned.
     val (doc, loopMs) = remember(c) { vm.sample() }
+    val placed = remember { PlacedHolder() }
+    var guideX by remember { mutableStateOf(false) }
+    var guideY by remember { mutableStateOf(false) }
+    val latestTransform by rememberUpdatedState(c.transform)
     Box(
       Modifier
         .padding(horizontal = 16.dp)
@@ -133,7 +152,22 @@ fun SetupScreen(
         .clickable { wholeFrame = !wholeFrame },
     ) {
       if (wholeFrame) {
-        PlayingCaptionPreview(frame, videoW, videoH, doc, loopMs, Modifier.align(Alignment.Center))
+        PlayingCaptionPreview(
+          frame, videoW, videoH, doc, loopMs,
+          Modifier
+            .align(Alignment.Center)
+            .captionMover(videoW, placed, { latestTransform }, { vm.setTransform(it) }) { x, y ->
+              guideX = x
+              guideY = y
+            }
+            .drawWithContent {
+              drawContent()
+              if (guideX) drawLine(Studio.green, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), strokeWidth = 2f)
+              if (guideY) drawLine(Studio.green, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 2f)
+            },
+          onPlaced = placed::update,
+        )
+        PreviewTag("Drag the caption · pinch to resize", Modifier.align(Alignment.BottomCenter).padding(8.dp))
       } else {
         PlayingCaptionPreview(frame, videoW, videoH, doc, loopMs, Modifier.fillMaxSize(), closeUp = true)
       }
@@ -207,38 +241,35 @@ fun SetupScreen(
       // 3. Caption size
       StepCard {
         StepHeader(3, "Caption size", "How many words are on screen at once")
-        val examples = remember(c) { CaptionLength.entries.associateWith { SetupSamples.firstCaptionText(c, it) } }
-        for (row in CaptionLength.entries.chunked(2)) {
-          Row(Modifier.height(IntrinsicSize.Min).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (l in row) {
-              ChoiceCard(
-                l.label,
-                c.length == l,
-                { vm.change { it.copy(length = l) } },
-                Modifier.weight(1f).fillMaxHeight(),
-                description = lengthHint(l),
-                example = examples[l],
-              )
-            }
-          }
+        val translationOn = c.isShown(TrackKind.TRANSLATION)
+        if (translationOn && c.main == TrackKind.TRANSLATION) {
+          TranslationSizeCards(c, vm)
+          SubHeading("Spoken words")
+          WordSizeCards(c, vm)
+        } else {
+          if (translationOn) SubHeading("Spoken words")
+          WordSizeCards(c, vm)
+          if (translationOn) TranslationSizeCards(c, vm)
         }
       }
       Spacer(Modifier.height(12.dp))
 
       // 4. Look
       StepCard {
-        StepHeader(4, "Look", "Font, colours and motion. Watch the preview at the top.")
+        StepHeader(4, "Look", "Pick a ready-made look, then change anything you like. Watch the preview at the top.")
+        // The cards only depend on the lines and words, not on the look being changed.
+        val cardKey = c.copy(style = StylePresets.all.first().style, transform = Transform(), placedByHand = false)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
           for (p in StylePresets.all) {
             val selected = p.id == c.presetId
-            val (sample, _) = remember(c, p.id) { vm.sample(presetId = p.id) }
+            val (sample, _) = remember(cardKey, p.id) { vm.presetSample(p.id) }
             val cue = sample.cues.firstOrNull()
             Column(
               Modifier
                 .width(136.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .border(2.dp, if (selected) Studio.accent else Studio.surface2, RoundedCornerShape(14.dp))
-                .clickable { vm.change { it.copy(presetId = p.id) } }
+                .clickable { vm.pickPreset(p.id) }
                 .padding(4.dp),
               horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -248,6 +279,28 @@ fun SetupScreen(
               Text(p.label, fontSize = 12.sp, color = if (selected) Studio.accent else Studio.text, modifier = Modifier.padding(top = 4.dp))
             }
           }
+        }
+
+        SubHeading("Change the look")
+        PillRow(LookTab.entries, lookTab, { it.label }, { lookTab = it })
+        val styleChange: StyleChange = { _, _, s -> vm.setStyle(s) }
+        when (lookTab) {
+          LookTab.FONT -> FontControls(c.style, c.language.script, styleChange) {
+            android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show()
+          }
+          LookTab.COLOURS -> {
+            ColourControls(c.style, styleChange)
+            OutlineControls(c.style, styleChange)
+          }
+          LookTab.MOTION -> MotionControls(c.style, styleChange)
+          LookTab.PLACE -> {
+            Text("Drag the caption on the preview to move it. Pinch to resize, twist to turn.", color = Studio.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            SizeControls(c.style, styleChange)
+            PlaceControls(c.transform) { _, _, t -> vm.setTransform(t) }
+          }
+        }
+        TextButton(onClick = vm::resetLook, modifier = Modifier.padding(top = 4.dp)) {
+          Text("Reset to \"${StylePresets.byId(c.presetId).label}\" as it comes")
         }
       }
 
@@ -280,17 +333,11 @@ fun SetupScreen(
         )
       }
       Spacer(Modifier.height(8.dp))
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { vm.startBlank(onSkip) }, modifier = Modifier.weight(1f)) {
-          Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(18.dp))
-          Spacer(Modifier.width(6.dp))
-          Text("Write my own")
-        }
-        OutlinedButton(onClick = { pickSubs.launch(arrayOf("*/*")) }, modifier = Modifier.weight(1f)) {
-          Icon(Icons.Rounded.FileUpload, null, modifier = Modifier.size(18.dp))
-          Spacer(Modifier.width(6.dp))
-          Text("Import .srt")
-        }
+      // Have an .srt already? "Write my own", then Import .srt in the editor's Captions tab.
+      OutlinedButton(onClick = { vm.startBlank(onSkip) }, modifier = Modifier.fillMaxWidth()) {
+        Icon(Icons.Rounded.Edit, null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("Write my own")
       }
     }
   }
@@ -402,6 +449,70 @@ private fun extraTitle(k: TrackKind, lang: Lang): String = when (k) {
     Lang.TANGLISH -> "Tamil script"
     else -> "Original script (${lang.nativeLabel})"
   }
+}
+
+/** The parts of the look step. */
+private enum class LookTab(val label: String) {
+  FONT("Font"),
+  COLOURS("Colours"),
+  MOTION("Motion"),
+  PLACE("Size & place"),
+}
+
+/** How many spoken words show at once, each card with the sample's first caption. */
+@Composable
+private fun WordSizeCards(c: SetupChoices, vm: SetupViewModel) {
+  val examples = remember(c) { CaptionLength.entries.associateWith { SetupSamples.firstCaptionText(c, it) } }
+  for (row in CaptionLength.entries.chunked(2)) {
+    Row(Modifier.height(IntrinsicSize.Min).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      for (l in row) {
+        ChoiceCard(
+          l.label,
+          c.length == l,
+          { vm.change { it.copy(length = l) } },
+          Modifier.weight(1f).fillMaxHeight(),
+          description = lengthHint(l),
+          example = examples[l],
+        )
+      }
+    }
+  }
+}
+
+/** How much of the translation shows at once: with the captions, or its own size. */
+@Composable
+private fun TranslationSizeCards(c: SetupChoices, vm: SetupViewModel) {
+  SubHeading("Translation" + (c.translateTo?.let { " · ${it.label}" } ?: ""))
+  val examples = remember(c) { (listOf(null) + CaptionLength.entries).associateWith { SetupSamples.firstTranslationText(c, it) } }
+  ChoiceCard(
+    "Same as the spoken words",
+    c.translationLength == null,
+    { vm.change { it.copy(translationLength = null) } },
+    Modifier.fillMaxWidth().padding(bottom = 8.dp),
+    description = "Changes together with the captions",
+    example = examples[null],
+  )
+  for (row in CaptionLength.entries.chunked(2)) {
+    Row(Modifier.height(IntrinsicSize.Min).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      for (l in row) {
+        ChoiceCard(
+          l.label,
+          c.translationLength == l,
+          { vm.change { it.copy(translationLength = l) } },
+          Modifier.weight(1f).fillMaxHeight(),
+          description = translationHint(l),
+          example = examples[l],
+        )
+      }
+    }
+  }
+}
+
+private fun translationHint(l: CaptionLength): String = when (l) {
+  CaptionLength.ONE_WORD -> "One word at a time"
+  CaptionLength.PUNCHY -> "Short bites"
+  CaptionLength.LINE -> "One line at a time"
+  CaptionLength.SENTENCE -> "The whole meaning at once"
 }
 
 private fun lengthHint(l: CaptionLength): String = when (l) {

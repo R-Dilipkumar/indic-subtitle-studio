@@ -104,7 +104,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     if (projectId == id) return
     projectId = id
     viewModelScope.launch {
-      val pf = g.projects.load(id) ?: return@launch
+      val loaded = g.projects.load(id) ?: return@launch
+      // Older projects copied a sentence's translation onto each of its captions: share it out.
+      val pf = loaded.copy(
+        doc = DocOps.shareRepeatedTranslations(loaded.doc),
+        aiDoc = loaded.aiDoc?.let { DocOps.shareRepeatedTranslations(it) },
+      )
       file = pf
       history = EditHistory(pf.doc)
       val video = g.projects.videoFile(pf.meta)
@@ -302,6 +307,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
   fun regroup(length: CaptionLength) {
     commit("Captions: ${length.label}", DocOps.regroup(_ui.value.doc, length, UuidIds))
     select(null)
+  }
+
+  /** How much of the translation shows at once (null: with each caption). */
+  fun setTranslationSize(size: CaptionLength?) {
+    val doc = _ui.value.doc
+    commit("Translation size: ${size?.label ?: "with the captions"}", doc.copy(tracks = doc.tracks.copy(translationSize = size)))
   }
 
   // ---------------------------------------------------------------------------------------
@@ -511,6 +522,27 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
       commit("Loaded your edited file (${next.cues.size} captions)", next)
       select(null)
       toast("Loaded ${next.cues.size} captions from your file. Undo brings the old ones back.")
+    }
+  }
+
+  /**
+   * Brings in captions from an .srt or .vtt file, replacing the ones here. The first line of
+   * each is the words; a second line becomes the translation when the translation line is on.
+   * One undo brings the old captions back.
+   */
+  fun importSrt(uri: Uri) {
+    val app = getApplication<Application>()
+    viewModelScope.launch {
+      val text = withContext(Dispatchers.IO) {
+        runCatching { app.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
+      }
+      val parsed = text?.let { SubtitleFormats.parse(it.removePrefix("\uFEFF")) }.orEmpty()
+      if (parsed.isEmpty()) return@launch toast("No captions found in that file. It should be an .srt or .vtt subtitle file.")
+      val doc = _ui.value.doc
+      val next = DocOps.importCaptions(doc, parsed, phonetic(), UuidIds, withTranslation = doc.tracks.showTranslation)
+      commit("Imported ${next.cues.size} captions", next)
+      select(null)
+      toast(if (doc.cues.isEmpty()) "Imported ${next.cues.size} captions." else "Imported ${next.cues.size} captions. Undo brings the old ones back.")
     }
   }
 

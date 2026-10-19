@@ -5,6 +5,9 @@ import io.github.rdilipkumar.subtitlestudio.core.model.HighlightMode
 import io.github.rdilipkumar.subtitlestudio.core.model.BoxStyle
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
+import io.github.rdilipkumar.subtitlestudio.core.timing.TranslationSplit
+import io.github.rdilipkumar.subtitlestudio.core.timing.TranslationTrack
+import io.github.rdilipkumar.subtitlestudio.core.timing.WordTiming
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -12,17 +15,17 @@ import kotlin.math.roundToInt
 object SubtitleFormats {
 
   /** The text lines of one caption for the chosen [tracks], top to bottom. */
-  fun linesOf(cue: Cue, tracks: List<TrackKind>, uppercaseLatin: Boolean = false): List<String> =
-    linesWithKinds(cue, tracks, uppercaseLatin).map { it.second }
+  fun linesOf(cue: Cue, tracks: List<TrackKind>, uppercaseLatin: Boolean = false, translation: String = cue.translation): List<String> =
+    linesWithKinds(cue, tracks, uppercaseLatin, translation).map { it.second }
 
   /** Like [linesOf], keeping which track each line came from. */
-  fun linesWithKinds(cue: Cue, tracks: List<TrackKind>, uppercaseLatin: Boolean = false): List<Pair<TrackKind, String>> {
+  fun linesWithKinds(cue: Cue, tracks: List<TrackKind>, uppercaseLatin: Boolean = false, translation: String = cue.translation): List<Pair<TrackKind, String>> {
     val lines = ArrayList<Pair<TrackKind, String>>(3)
     for (t in tracks) {
       val line = when (t) {
         TrackKind.NATIVE -> cue.text
         TrackKind.PHONETIC -> cue.phonetic
-        TrackKind.TRANSLATION -> cue.translation
+        TrackKind.TRANSLATION -> translation
       }.trim()
       // English videos: the English-letters line equals the words, so do not repeat it.
       if (line.isEmpty() || lines.any { it.second.equals(line, ignoreCase = true) }) continue
@@ -31,10 +34,22 @@ object SubtitleFormats {
     return lines
   }
 
+  /**
+   * The translation a file shows with each caption. With its own size on screen the translation
+   * may change inside a caption, which files cannot do, so a caption carries every piece said
+   * while it shows.
+   */
+  fun translationFor(doc: SubtitleDoc): (Cue) -> String {
+    val size = doc.tracks.translationSize ?: return { it.translation }
+    val chunks = TranslationTrack.build(doc.cues, size)
+    return { TranslationTrack.textDuring(chunks, it) }
+  }
+
   fun toSrt(doc: SubtitleDoc, tracks: List<TrackKind>): String = buildString {
+    val translation = translationFor(doc)
     var n = 1
     for (c in doc.cues) {
-      val lines = linesOf(c, tracks)
+      val lines = linesOf(c, tracks, translation = translation(c))
       if (lines.isEmpty()) continue
       append(n++).append('\n')
       append(srtTime(c.startMs)).append(" --> ").append(srtTime(c.endMs)).append('\n')
@@ -44,9 +59,10 @@ object SubtitleFormats {
   }
 
   fun toVtt(doc: SubtitleDoc, tracks: List<TrackKind>): String = buildString {
+    val translation = translationFor(doc)
     append("WEBVTT\n\n")
     for (c in doc.cues) {
-      val lines = linesOf(c, tracks)
+      val lines = linesOf(c, tracks, translation = translation(c))
       if (lines.isEmpty()) continue
       append(vttTime(c.startMs)).append(" --> ").append(vttTime(c.endMs)).append('\n')
       lines.forEach { append(it.replace("-->", "->")).append('\n') }
@@ -81,8 +97,10 @@ object SubtitleFormats {
       append(if (st.bold) -1 else 0).append(",0,0,0,100,100,0,0,").append(borderStyle).append(',')
       append(fmt(outline)).append(',').append(fmt(shadow)).append(",5,20,20,20,1\n\n")
       append("[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
+      val translationOf = translationFor(doc)
       for (c in doc.cues) {
-        val lines = linesWithKinds(c, tracks, doc.styleOf(c).uppercaseLatin)
+        val translation = translationOf(c)
+        val lines = linesWithKinds(c, tracks, doc.styleOf(c).uppercaseLatin, translation)
         if (lines.isEmpty()) continue
         val cs = doc.styleOf(c)
         val tr = doc.transformOf(c)
@@ -106,19 +124,29 @@ object SubtitleFormats {
           }
           val lineSize = if (first) (cs.textSize * h) else (cs.textSize * cs.secondaryScale * h)
           sb.append("{\\fs").append(lineSize.roundToInt())
-          val karaoke = first && cs.highlight != HighlightMode.NONE && kind != TrackKind.TRANSLATION
+          val karaoke = first && cs.highlight != HighlightMode.NONE
           if (karaoke) {
             // \k: each word starts in SecondaryColour and turns PrimaryColour when spoken.
             sb.append("\\1c").append(assColor(cs.highlightColor, bgr = true)).append("\\2c").append(assColor(color, bgr = true)).append('}')
-            val words = if (kind == TrackKind.PHONETIC) c.words.map { it.phonetic } else c.words.map { it.text }
+            val timed: List<Triple<String, Long, Long>> = when (kind) {
+              TrackKind.NATIVE -> c.words.map { Triple(it.text, it.startMs, it.endMs) }
+              TrackKind.PHONETIC -> c.words.map { Triple(it.phonetic, it.startMs, it.endMs) }
+              TrackKind.TRANSLATION -> {
+                // Translated words are spread over the time the caption is spoken.
+                val words = TranslationSplit.words(line)
+                WordTiming.spreadWords(words, TranslationSplit.speechStart(c), TranslationSplit.speechEnd(c))
+                  .mapIndexed { k, (s, e) -> Triple(words[k], s, e) }
+              }
+            }
             var t = c.startMs
-            for ((wi, word) in c.words.withIndex()) {
-              val lead = ((word.startMs - t).coerceAtLeast(0) / 10).toInt()
+            for ((wi, word) in timed.withIndex()) {
+              val (text, start, end) = word
+              val lead = ((start - t).coerceAtLeast(0) / 10).toInt()
               if (lead > 0) sb.append("{\\k").append(lead).append('}')
-              val dur = ((word.endMs - word.startMs).coerceAtLeast(10) / 10).toInt()
-              sb.append("{\\k").append(dur).append('}').append(escape(words[wi]))
-              if (wi < c.words.lastIndex) sb.append(' ')
-              t = word.endMs
+              val dur = ((end - start).coerceAtLeast(10) / 10).toInt()
+              sb.append("{\\k").append(dur).append('}').append(escape(text))
+              if (wi < timed.lastIndex) sb.append(' ')
+              t = end
             }
           } else {
             sb.append("\\1c").append(assColor(color, bgr = true)).append('}').append(escape(line))

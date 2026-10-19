@@ -12,6 +12,7 @@ import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
 import io.github.rdilipkumar.subtitlestudio.core.timing.CueBuilder
 import io.github.rdilipkumar.subtitlestudio.core.timing.IdGen
 import io.github.rdilipkumar.subtitlestudio.core.timing.TimedWord
+import io.github.rdilipkumar.subtitlestudio.core.timing.TranslationSplit
 import io.github.rdilipkumar.subtitlestudio.core.timing.WordTiming
 import kotlin.math.max
 import kotlin.math.min
@@ -172,23 +173,17 @@ object DocOps {
     val b = cue.words[afterWordIndex + 1]
     val gapMid = if (b.startMs > a.endMs) (a.endMs + b.startMs) / 2 else a.endMs
     val cut = gapMid.coerceIn(cue.startMs + MIN_CUE_MS, end - MIN_CUE_MS)
-    val stale = if (cue.translation.isNotEmpty()) TranslationState.STALE else TranslationState.NONE
-    val first = cue.copy(
-      endMs = cut,
-      words = cue.words.subList(0, afterWordIndex + 1),
-      translationState = stale,
-      edited = true,
+    var first = clampWords(cue.copy(endMs = cut, words = cue.words.subList(0, afterWordIndex + 1), edited = true))
+    var second = clampWords(
+      cue.copy(id = ids.next(), startMs = cut, endMs = end, words = cue.words.subList(afterWordIndex + 1, cue.words.size), edited = true),
     )
-    val second = cue.copy(
-      id = ids.next(),
-      startMs = cut,
-      endMs = end,
-      words = cue.words.subList(afterWordIndex + 1, cue.words.size),
-      translation = "",
-      translationState = stale,
-      edited = true,
-    )
-    return doc.copy(cues = doc.cues.toMutableList().apply { set(i, clampWords(first)); add(i + 1, clampWords(second)) })
+    // Both halves keep their share of the translation.
+    if (cue.translation.isNotBlank()) {
+      val (ta, tb) = TranslationSplit.share(cue.translation, listOf(first, second))
+      first = first.copy(translation = ta)
+      second = second.copy(translation = tb)
+    }
+    return doc.copy(cues = doc.cues.toMutableList().apply { set(i, first); add(i + 1, second) })
   }
 
   /** Splits at the word gap nearest to [timeMs]. */
@@ -214,7 +209,8 @@ object DocOps {
     if (i < 0 || i >= doc.cues.lastIndex) return doc
     val a = doc.cues[i]
     val b = doc.cues[i + 1]
-    val translation = listOf(a.translation, b.translation).filter { it.isNotBlank() }.joinToString(" ")
+    // A piece carried over to both captions is said once.
+    val translation = listOf(a.translation, b.translation).map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(" ")
     val merged = a.copy(
       endMs = b.endMs,
       words = a.words + b.words,
@@ -266,7 +262,7 @@ object DocOps {
 
   /**
    * Rebuilds all captions to a new size (e.g. "2–3 words" for Reels), keeping every word and
-   * its fixes. Translations no longer match the new captions, so they are cleared.
+   * its fixes. Translations are shared out again over the new captions.
    */
   fun regroup(doc: SubtitleDoc, length: CaptionLength, ids: IdGen): SubtitleDoc {
     // Same filter and (stable) order as CueBuilder.build, so its words line up one to one.
@@ -284,7 +280,103 @@ object DocOps {
       val words = c.words.map { all[next++].third }
       c.copy(words = words, edited = words.any { it.edited })
     }
-    return doc.copy(cues = cues)
+    return doc.copy(cues = carryTranslations(shareRepeated(doc.cues), cues))
+  }
+
+  /**
+   * Gives rebuilt captions the translations of the old ones. Old and new captions hold the same
+   * words, so they form blocks that cover the same words; each block's old pieces are joined and
+   * shared out over its new captions.
+   */
+  private fun carryTranslations(old: List<Cue>, new: List<Cue>): List<Cue> {
+    if (old.none { it.translation.isNotBlank() }) return new
+    val oldOf = HashMap<String, Int>()
+    for ((i, c) in old.withIndex()) for (w in c.words) oldOf[w.id] = i
+    val lo = new.map { c -> c.words.mapNotNull { oldOf[it.id] }.minOrNull() }
+    val hi = new.map { c -> c.words.mapNotNull { oldOf[it.id] }.maxOrNull() }
+    val out = new.toMutableList()
+    var a = 0
+    while (a < new.size) {
+      val first = lo[a]
+      if (first == null) {
+        a++
+        continue
+      }
+      var b = a
+      var top = hi[a]!!
+      while (b + 1 < new.size && lo[b + 1] != null && lo[b + 1]!! <= top) {
+        b++
+        top = maxOf(top, hi[b]!!)
+      }
+      val sources = old.subList(first, top + 1).filter { it.translation.isNotBlank() }
+      if (sources.isNotEmpty()) {
+        val text = sources.joinToString(" ") { it.translation.trim() }
+        val state = when {
+          sources.any { it.translationState == TranslationState.STALE } -> TranslationState.STALE
+          sources.any { it.translationState == TranslationState.USER } -> TranslationState.USER
+          else -> TranslationState.AUTO
+        }
+        val block = new.subList(a, b + 1)
+        for ((k, piece) in TranslationSplit.share(text, block).withIndex()) {
+          out[a + k] = out[a + k].copy(translation = piece, translationState = state)
+        }
+      }
+      a = b + 1
+    }
+    return out
+  }
+
+  /**
+   * Older projects copied a sentence's translation onto each of its captions. Shares such
+   * repeats out, so each caption carries its own piece. Nothing else changes.
+   */
+  fun shareRepeatedTranslations(doc: SubtitleDoc): SubtitleDoc {
+    val cues = shareRepeated(doc.cues)
+    return if (cues === doc.cues) doc else doc.copy(cues = cues)
+  }
+
+  private fun shareRepeated(cues: List<Cue>): List<Cue> {
+    var out: MutableList<Cue>? = null
+    var i = 0
+    while (i < cues.size) {
+      val t = cues[i].translation.trim()
+      var k = i
+      while (t.isNotEmpty() && k + 1 < cues.size && cues[k + 1].translation.trim() == t) k++
+      // One word over two captions is already as shared as it gets.
+      if (k > i && TranslationSplit.words(t).size > 1) {
+        val run = cues.subList(i, k + 1)
+        val pieces = TranslationSplit.share(t, run)
+        val list = out ?: cues.toMutableList().also { out = it }
+        for ((x, piece) in pieces.withIndex()) list[i + x] = run[x].copy(translation = piece)
+      }
+      i = k + 1
+    }
+    return out ?: cues
+  }
+
+  /**
+   * Captions from a subtitle file (.srt or .vtt). The first line of each is taken as the words;
+   * with [withTranslation] a second line becomes the translation, as typed by the user. The
+   * project's look and lines stay.
+   */
+  fun importCaptions(doc: SubtitleDoc, parsed: List<SubtitleFormats.ParsedCue>, ph: Phonetic, ids: IdGen, withTranslation: Boolean): SubtitleDoc {
+    val cues = parsed.sortedBy { it.startMs }.mapNotNull { p ->
+      val parts = p.lines.firstOrNull()?.split(Regex("\\s+"))?.filter { it.isNotEmpty() }.orEmpty()
+      if (parts.isEmpty()) return@mapNotNull null
+      val end = max(p.endMs, p.startMs + MIN_CUE_MS)
+      val times = WordTiming.spreadWords(parts, p.startMs, end)
+      val translation = if (withTranslation) p.lines.getOrNull(1)?.trim().orEmpty() else ""
+      Cue(
+        id = ids.next(),
+        startMs = p.startMs,
+        endMs = end,
+        words = parts.mapIndexed { k, w -> Word(ids.next(), w, ph.of(w), times[k].first, times[k].second) },
+        translation = translation,
+        translationState = if (translation.isEmpty()) TranslationState.NONE else TranslationState.USER,
+        origin = Origin.IMPORTED,
+      )
+    }
+    return doc.copy(cues = CueBuilder.settleTimes(cues).map { clampWords(it) })
   }
 
   /**

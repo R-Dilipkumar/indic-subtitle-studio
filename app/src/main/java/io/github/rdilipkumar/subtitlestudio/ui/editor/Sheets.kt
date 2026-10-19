@@ -122,6 +122,13 @@ fun rememberEditedFilePicker(vm: EditorViewModel): () -> Unit {
   return { launcher.launch(arrayOf("application/x-subrip", "text/vtt", "text/plain", "text/*", "application/octet-stream", "*/*")) }
 }
 
+/** Opens the phone's file picker for an .srt / .vtt whose captions replace the project's. */
+@Composable
+fun rememberSrtImporter(vm: EditorViewModel): () -> Unit {
+  val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) vm.importSrt(uri) }
+  return { launcher.launch(arrayOf("application/x-subrip", "text/vtt", "text/plain", "text/*", "application/octet-stream", "*/*")) }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ExportSheet(ui: EditorUi, vm: EditorViewModel, onClose: () -> Unit, onOpen: (Uri, String) -> Unit, onShare: (Uri, String) -> Unit) {

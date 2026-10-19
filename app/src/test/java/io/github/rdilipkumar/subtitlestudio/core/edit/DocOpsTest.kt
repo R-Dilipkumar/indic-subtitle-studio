@@ -69,13 +69,17 @@ class DocOpsTest {
   @Test fun split_then_merge() {
     val split = DocOps.splitCue(doc(), "a", 0, ids)
     assertEquals(3, split.cues.size)
-    assertEquals(TranslationState.STALE, split.cues[0].translationState)
+    // Each half keeps its share of the translation.
+    assertEquals("Hello", split.cues[0].translation)
+    assertEquals("friends", split.cues[1].translation)
+    assertEquals(TranslationState.AUTO, split.cues[1].translationState)
     assertEquals(510L, split.cues[0].endMs) // halfway between the words
     assertEquals(510L, split.cues[1].startMs)
     assertValid(split)
     val merged = DocOps.mergeWithNext(split, "a")
     assertEquals(2, merged.cues.size)
     assertEquals(2, merged.cue("a")!!.words.size)
+    assertEquals("Hello friends", merged.cue("a")!!.translation)
     assertValid(merged)
   }
 
@@ -136,6 +140,51 @@ class DocOpsTest {
     assertEquals(4, d.cues.size)
     assertEquals(listOf("வணக்கம்", "நண்பர்களே", "எப்படி", "இருக்கீங்க"), d.cues.map { it.text })
     assertValid(d)
+  }
+
+  @Test fun regroup_shares_translations_over_new_captions() {
+    val d = DocOps.regroup(doc(), CaptionLength.ONE_WORD, ids)
+    assertEquals(listOf("Hello", "friends", "", ""), d.cues.map { it.translation })
+    assertEquals(TranslationState.AUTO, d.cues[1].translationState)
+    assertEquals(TranslationState.NONE, d.cues[2].translationState)
+    // And back to bigger captions: the pieces join up again.
+    val back = DocOps.regroup(d, CaptionLength.LINE, ids)
+    assertEquals("Hello friends", back.cues[0].translation)
+  }
+
+  @Test fun repeated_sentence_translations_are_shared_out() {
+    val old = SubtitleDoc(
+      cues = listOf(
+        Cue("a", 0, 1000, listOf(word("w0", "வணக்கம்", 0, 1000)), translation = "Hello my dear friends"),
+        Cue("b", 1000, 2000, listOf(word("w1", "நண்பர்களே", 1000, 2000)), translation = "Hello my dear friends"),
+      ),
+    )
+    val d = DocOps.shareRepeatedTranslations(old)
+    assertEquals(listOf("Hello my", "dear friends"), d.cues.map { it.translation })
+    assertEquals(d, DocOps.shareRepeatedTranslations(d)) // nothing more to do
+  }
+
+  @Test fun importCaptions_takes_words_and_translation() {
+    val srt = """
+1
+00:00:00,000 --> 00:00:01,000
+வணக்கம் நண்பர்களே
+Hello friends
+
+2
+00:00:00,800 --> 00:00:02,000
+எப்படி
+"""
+    val parsed = io.github.rdilipkumar.subtitlestudio.core.format.SubtitleFormats.parse(srt)
+    val d = DocOps.importCaptions(doc(), parsed, ph, ids, withTranslation = true)
+    assertEquals(2, d.cues.size)
+    assertEquals("vanakkam nanbargale", d.cues[0].phonetic)
+    assertEquals("Hello friends", d.cues[0].translation)
+    assertEquals(TranslationState.USER, d.cues[0].translationState)
+    assertEquals(TranslationState.NONE, d.cues[1].translationState)
+    assertEquals(doc().style, d.style)
+    assertValid(d)
+    assertEquals("", DocOps.importCaptions(doc(), parsed, ph, ids, withTranslation = false).cues[0].translation)
   }
 
   @Test fun regroup_keeps_word_ids_even_for_same_word_at_same_time() {

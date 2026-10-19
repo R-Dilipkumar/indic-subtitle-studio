@@ -10,6 +10,10 @@ SIL Open Font License 1.1 (full text: OFL.txt)
 - Bangers: Copyright 2010 The Bangers Project Authors
 - Lilita One: Copyright (c) 2011 Juan Montoreano
 - Archivo Black: Copyright 2017 The Archivo Black Project Authors
+- Coiny: Copyright (c) 2015, Marcelo Magalhaes
+- Catamaran: Copyright 2020 The Catamaran Project Authors (https://github.com/VanillaandCream/Catamaran-Tamil)
+- Arima: Copyright 2020 The Arima Project Authors (https://github.com/NDISCOVER/Arima-Font)
+- Kavivanar: Copyright (c) 2015, Tharique Azeez
 
 Apache License 2.0 (full text: APACHE-2.0.txt)
 - Luckiest Guy: Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI)

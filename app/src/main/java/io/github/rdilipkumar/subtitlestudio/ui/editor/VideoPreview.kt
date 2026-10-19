@@ -44,8 +44,8 @@ import io.github.rdilipkumar.subtitlestudio.core.model.SafeZone
 import io.github.rdilipkumar.subtitlestudio.core.model.SubtitleDoc
 import io.github.rdilipkumar.subtitlestudio.core.model.Transform
 import io.github.rdilipkumar.subtitlestudio.render.CaptionRenderer
+import io.github.rdilipkumar.subtitlestudio.ui.common.CaptionDrag
 import io.github.rdilipkumar.subtitlestudio.ui.theme.Studio
-import kotlin.math.abs
 import kotlin.math.min
 
 /**
@@ -143,18 +143,12 @@ fun VideoPreview(
                   cur = start
                 }
                 if (moved) {
-                  var nx = (cur.x + pan.x / size.width).coerceIn(0.02f, 0.98f)
-                  var ny = (cur.y + pan.y / size.height).coerceIn(0.02f, 0.98f)
-                  var ns = (cur.scale * zoom).coerceIn(0.3f, 4f)
-                  var nr = cur.rotation + rot
-                  cur = cur.copy(x = nx, y = ny, scale = ns, rotation = nr)
-                  // Snap to the centre lines and to level.
-                  guideX = abs(nx - 0.5f) < 0.015f
-                  guideY = abs(ny - 0.5f) < 0.012f
-                  if (guideX) nx = 0.5f
-                  if (guideY) ny = 0.5f
-                  if (abs(nr) < 3f) nr = 0f
-                  sent = cur.copy(x = nx, y = ny, rotation = nr)
+                  // Snaps to the centre lines and to level.
+                  val step = CaptionDrag.step(cur, pan, zoom, rot, size.width.toFloat(), size.height.toFloat())
+                  cur = step.raw
+                  guideX = step.guideX
+                  guideY = step.guideY
+                  sent = step.shown
                   onTransform(sent, false)
                   event.changes.forEach { if (it.positionChange() != Offset.Zero) it.consume() }
                 }

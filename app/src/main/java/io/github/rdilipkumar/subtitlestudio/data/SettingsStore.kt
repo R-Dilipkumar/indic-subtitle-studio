@@ -1,8 +1,10 @@
 package io.github.rdilipkumar.subtitlestudio.data
 
+import io.github.rdilipkumar.subtitlestudio.core.model.CaptionStyle
 import io.github.rdilipkumar.subtitlestudio.core.model.Lang
 import io.github.rdilipkumar.subtitlestudio.core.model.PhoneticMode
 import io.github.rdilipkumar.subtitlestudio.core.model.TrackKind
+import io.github.rdilipkumar.subtitlestudio.core.model.Transform
 import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +28,12 @@ data class AppSettings(
   val lastLanguage: Lang = Lang.TAMIL,
   val lastTranslateTo: Lang? = null,
   val lastLength: CaptionLength = CaptionLength.PUNCHY,
+  /** The translation's own size; null follows the captions. */
+  val lastTranslationLength: CaptionLength? = null,
   val lastPreset: String = "pop",
+  /** The look last used on the setup screen (a ready-made look plus the user's changes). */
+  val lastStyle: CaptionStyle? = null,
+  val lastTransform: Transform? = null,
   val showNative: Boolean = true,
   val showPhonetic: Boolean = true,
   val showTranslation: Boolean = false,

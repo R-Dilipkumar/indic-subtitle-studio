@@ -1,5 +1,6 @@
 package io.github.rdilipkumar.subtitlestudio.core.model
 
+import io.github.rdilipkumar.subtitlestudio.core.timing.CaptionLength
 import kotlinx.serialization.Serializable
 
 /**
@@ -129,6 +130,11 @@ data class TrackSettings(
   val showTranslation: Boolean = false,
   /** Top-to-bottom order. The first visible line is drawn largest. */
   val order: List<TrackKind> = listOf(TrackKind.NATIVE, TrackKind.PHONETIC, TrackKind.TRANSLATION),
+  /**
+   * How much of the translation shows at once, on its own timing. Null keeps each caption's own
+   * piece, so the translation changes together with the captions.
+   */
+  val translationSize: CaptionLength? = null,
 ) {
   fun isVisible(kind: TrackKind): Boolean = when (kind) {
     TrackKind.NATIVE -> showNative
