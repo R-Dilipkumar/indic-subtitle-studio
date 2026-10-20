@@ -111,7 +111,7 @@ class VideoExporter(private val context: Context, private val fonts: FontRegistr
     val values = ContentValues().apply {
       put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
       put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-      put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/Subtitle Studio")
+      put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/Offline Reel Captions")
       put(MediaStore.Video.Media.IS_PENDING, 1)
     }
     val resolver = context.contentResolver
@@ -129,12 +129,12 @@ class VideoExporter(private val context: Context, private val fonts: FontRegistr
     uri
   }
 
-  /** Writes a subtitle file into Downloads/Subtitle Studio. */
+  /** Writes a subtitle file into Downloads/Offline Reel Captions. */
   suspend fun saveSubtitleFile(text: String, displayName: String, mime: String): Uri = withContext(Dispatchers.IO) {
     val values = ContentValues().apply {
       put(MediaStore.Downloads.DISPLAY_NAME, displayName)
       put(MediaStore.Downloads.MIME_TYPE, mime)
-      put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Subtitle Studio")
+      put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Offline Reel Captions")
       put(MediaStore.Downloads.IS_PENDING, 1)
     }
     val resolver = context.contentResolver

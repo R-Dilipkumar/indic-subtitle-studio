@@ -103,7 +103,7 @@ fun HomeScreen(
         Column {
           Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-              Text("Subtitle Studio", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Studio.text)
+              Text("Offline Reel Captions", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Studio.text)
               Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.WifiOff, null, tint = Studio.green, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))

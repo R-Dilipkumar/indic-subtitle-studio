@@ -1,4 +1,4 @@
-Fonts bundled with Subtitle Studio (all from Google Fonts, free to use and ship in apps)
+Fonts bundled with Offline Reel Captions (all from Google Fonts, free to use and ship in apps)
 
 SIL Open Font License 1.1 (full text: OFL.txt)
 - Baloo 2 family (Thambi, Tammudu, Tamma, Chettan): Copyright 2019 The Baloo 2 Project Authors

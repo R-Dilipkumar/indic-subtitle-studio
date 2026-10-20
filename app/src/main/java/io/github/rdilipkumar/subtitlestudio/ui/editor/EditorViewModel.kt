@@ -469,7 +469,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
         val name = safeName(meta.name) + "_subtitled_" + System.currentTimeMillis() % 100000 + ".mp4"
         val uri = g.exporter.saveToGallery(tmp, name)
-        _ui.update { it.copy(export = ExportState.Done("Saved to Movies/Subtitle Studio", uri, "video/mp4")) }
+        _ui.update { it.copy(export = ExportState.Done("Saved to Movies/Offline Reel Captions", uri, "video/mp4")) }
       } catch (e: kotlinx.coroutines.CancellationException) {
         _ui.update { it.copy(export = ExportState.Idle) }
       } catch (e: Exception) {
@@ -496,7 +496,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val script = if (_ui.value.language.isIndic) _ui.value.language.script else io.github.rdilipkumar.subtitlestudio.core.model.Script.LATIN
         val text = g.exporter.subtitleText(type, doc, tracks, meta.width, meta.height, script)
         val uri = g.exporter.saveSubtitleFile(text, safeName(meta.name) + nameEnding + "." + type.ext, type.mime)
-        _ui.update { it.copy(export = ExportState.Done("Saved to Downloads/Subtitle Studio", uri, type.mime)) }
+        _ui.update { it.copy(export = ExportState.Done("Saved to Downloads/Offline Reel Captions", uri, type.mime)) }
       } catch (e: Exception) {
         _ui.update { it.copy(export = ExportState.Failed(e.message ?: "Could not save the file")) }
       }

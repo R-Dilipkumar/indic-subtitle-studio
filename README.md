@@ -1,14 +1,14 @@
-# Subtitle Studio — Offline Indian Subtitles
+# Offline Reel Captions — Auto Subtitles for Indian Reels, Fully Offline
 
 **Automatic subtitles for Tamil, Tanglish, Telugu, Kannada, Malayalam, Hindi and English videos, made fully offline on your Android phone.**
 
-Pick a video, pick the language, style the captions, tap **Make subtitles**. Subtitle Studio listens to the video, writes what people say, can spell it in English letters ("vanakkam nanbargale") or translate it, and lets you fix and style every caption. Then it exports a new MP4 with the captions burned in, or an `.srt` file.
+Pick a video, pick the language, style the captions, tap **Make subtitles**. Offline Reel Captions listens to the video, writes what people say, can spell it in English letters ("vanakkam nanbargale") or translate it, and lets you fix and style every caption. Then it exports a new MP4 with the captions burned in, or an `.srt` file.
 
 Speech recognition and translation run on the phone. Your video is not uploaded anywhere.
 
-[![Download APK](https://img.shields.io/github/v/release/R-Dilipkumar/indic-subtitle-studio?label=Download%20APK&color=success)](https://github.com/R-Dilipkumar/indic-subtitle-studio/releases/latest)
+[![Download APK](https://img.shields.io/github/v/release/R-Dilipkumar/offline-reel-captions?label=Download%20APK&color=success)](https://github.com/R-Dilipkumar/offline-reel-captions/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/R-Dilipkumar/indic-subtitle-studio?style=social)](https://github.com/R-Dilipkumar/indic-subtitle-studio/stargazers)
+[![Stars](https://img.shields.io/github/stars/R-Dilipkumar/offline-reel-captions?style=social)](https://github.com/R-Dilipkumar/offline-reel-captions/stargazers)
 [![Android 10+](https://img.shields.io/badge/Android-10%2B-brightgreen.svg)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Speech: Whisper + sherpa-onnx](https://img.shields.io/badge/Speech-Whisper%20%2B%20sherpa--onnx-orange.svg)](https://github.com/k2-fsa/sherpa-onnx)
@@ -22,9 +22,9 @@ Speech recognition and translation run on the phone. Your video is not uploaded 
   <img src="docs/images/history.png" width="180" alt="Edit history">
 </p>
 
-## Why Subtitle Studio
+## Why Offline Reel Captions
 
-Most caption apps send your video to a server, charge per minute, and get Indian languages wrong, or only do Hindi. Subtitle Studio is different:
+Most caption apps send your video to a server, charge per minute, and get Indian languages wrong, or only do Hindi. Offline Reel Captions is different:
 
 - **Made for South Indian creators.** Speech models tuned for Tamil, Telugu, Kannada and Malayalam, plus **Tanglish** (Tamil talk full of English words) where English words come out in English.
 - **English letters, by sound.** "Hi makkale vibe pannalaamaa" instead of a translation, so anyone can read along. Casual chat style or exact with accent marks.
@@ -33,11 +33,11 @@ Most caption apps send your video to a server, charge per minute, and get Indian
 - **Style it before you make it.** Change the font, colours, motion, size and place right on the first screen. A live preview plays every change, and you can drag and pinch the caption on it.
 - **Free and open source** under the MIT license.
 
-If Subtitle Studio is useful to you, please give it a ⭐ — it helps other creators find it.
+If Offline Reel Captions is useful to you, please give it a ⭐ — it helps other creators find it.
 
 ## Download
 
-Get the APK from the [latest release](https://github.com/R-Dilipkumar/indic-subtitle-studio/releases/latest):
+Get the APK from the [latest release](https://github.com/R-Dilipkumar/offline-reel-captions/releases/latest):
 
 | File | For |
 |---|---|
@@ -131,8 +131,8 @@ flowchart LR
 Needs JDK 17 and the Android SDK (platform 36).
 
 ```bash
-git clone https://github.com/R-Dilipkumar/indic-subtitle-studio.git
-cd indic-subtitle-studio
+git clone https://github.com/R-Dilipkumar/offline-reel-captions.git
+cd offline-reel-captions
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 ```
 
@@ -159,4 +159,4 @@ Bug reports, wrong spellings in English letters and pull requests are welcome. P
 
 ## License
 
-Subtitle Studio's code is released under the [MIT License](LICENSE) © 2026 Dilipkumar R. Downloaded models keep their own licences (MIT, Apache-2.0, and the Tanglish model's non-commercial licence, listed above).
+Offline Reel Captions's code is released under the [MIT License](LICENSE) © 2026 Dilipkumar R. Downloaded models keep their own licences (MIT, Apache-2.0, and the Tanglish model's non-commercial licence, listed above).

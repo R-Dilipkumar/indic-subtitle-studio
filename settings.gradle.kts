@@ -20,6 +20,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "SubtitleStudio"
+rootProject.name = "OfflineReelCaptions"
 
 include(":app")
