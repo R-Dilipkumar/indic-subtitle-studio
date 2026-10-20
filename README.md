@@ -1,10 +1,36 @@
 # Offline Reel Captions — Auto Subtitles for Indian Reels, Fully Offline
 
-**Automatic subtitles for Tamil, Tanglish, Telugu, Kannada, Malayalam, Hindi and English videos, made fully offline on your Android phone.**
+**An Android app that adds captions to your Reels, Shorts and videos automatically. It listens to what is said and writes it on screen for you. No typing, no internet, no upload.**
 
-Pick a video, pick the language, style the captions, tap **Make subtitles**. Offline Reel Captions listens to the video, writes what people say, can spell it in English letters ("vanakkam nanbargale") or translate it, and lets you fix and style every caption. Then it exports a new MP4 with the captions burned in, or an `.srt` file.
+Works with **Tamil, Tanglish, Telugu, Kannada, Malayalam, Hindi and English**.
 
-Speech recognition and translation run on the phone. Your video is not uploaded anywhere.
+## What it does
+
+You give it a video. It gives you back the same video with captions on it.
+
+1. **Pick a video** from your phone.
+2. **Tap Make subtitles.** The app listens to the speech and writes every word, timed to when it is said.
+3. **Save.** You get a new MP4 with the captions burned in, ready to post. Or get an `.srt` file to use in any video editor.
+
+The captions can show the words three ways, alone or together:
+
+| Show the words as… | Example |
+|---|---|
+| **English letters** (how it sounds) | `vanakkam nanbargale` |
+| **English meaning** (translation) | `hello friends` |
+| **Original script** | `வணக்கம் நண்பர்களே` |
+
+Everything runs on your phone. Your video never leaves it.
+
+## What you can use it for
+
+- **Instagram Reels, YouTube Shorts and TikTok-style videos.** Most people watch with the sound off. Captions keep them watching.
+- **Reach people who don't speak your language.** Talk in Tamil and show English letters so anyone can read along, or show the English meaning so anyone can understand.
+- **Tanglish talk.** Speak Tamil mixed with English and the English words come out in English, the way you actually talk.
+- **Vlogs, recipes, tutorials, interviews and podcast clips.** Get readable captions without typing them by hand.
+- **Make your videos accessible** to people who are deaf or hard of hearing.
+- **Get a subtitle file** (`.srt`, `.vtt`, `.ass`) for YouTube, Premiere Pro, CapCut or any editor.
+- **Private or no-internet use.** Once the language pack is downloaded, it works in airplane mode.
 
 [![Download APK](https://img.shields.io/github/v/release/R-Dilipkumar/offline-reel-captions?label=Download%20APK&color=success)](https://github.com/R-Dilipkumar/offline-reel-captions/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -22,7 +48,7 @@ Speech recognition and translation run on the phone. Your video is not uploaded 
   <img src="docs/images/history.png" width="180" alt="Edit history">
 </p>
 
-## Why Offline Reel Captions
+## Why this app
 
 Most caption apps send your video to a server, charge per minute, and get Indian languages wrong, or only do Hindi. Offline Reel Captions is different:
 
@@ -159,4 +185,4 @@ Bug reports, wrong spellings in English letters and pull requests are welcome. P
 
 ## License
 
-Offline Reel Captions's code is released under the [MIT License](LICENSE) © 2026 Dilipkumar R. Downloaded models keep their own licences (MIT, Apache-2.0, and the Tanglish model's non-commercial licence, listed above).
+The code is released under the [MIT License](LICENSE) © 2026 Dilipkumar R. Downloaded models keep their own licences (MIT, Apache-2.0, and the Tanglish model's non-commercial licence, listed above).
